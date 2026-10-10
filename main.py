@@ -295,16 +295,16 @@ def parse_spotify_html(html: str, item_type: str, item_id: str) -> Optional[dict
                         track_list = entity.get("tracks", {}).get("items", [])
 
                     tracks = []
-                    for t in track_list:
-                        t_title = t.get("title") or t.get("name")
+                    for item in track_list:
+                        t_title = item.get("title") or item.get("name")
                         if not t_title:
                             continue
-                        t_artist = t.get("subtitle") or ""
-                        if not t_artist and isinstance(t.get("artists"), list):
-                            t_artist = ", ".join(a.get("name") for a in t.get("artists") if isinstance(a, dict) and a.get("name"))
-                        t_dur_ms = t.get("duration") or 0
+                        t_artist = item.get("subtitle") or ""
+                        if not t_artist and isinstance(item.get("artists"), list):
+                            t_artist = ", ".join(a.get("name") for a in item.get("artists") if isinstance(a, dict) and a.get("name"))
+                        t_dur_ms = item.get("duration") or 0
                         t_dur = int(t_dur_ms) // 1000 if t_dur_ms else 0
-                        uri = t.get("uri") or ""
+                        uri = item.get("uri") or ""
                         tid = uri.split(":")[-1] if uri else ""
                         t_url = f"https://open.spotify.com/track/{tid}" if tid else ""
                         tracks.append({
@@ -322,7 +322,7 @@ def parse_spotify_html(html: str, item_type: str, item_id: str) -> Optional[dict
                             "title": title,
                             "artist": "",
                             "thumbnail": thumb,
-                            "duration": sum(t["duration"] for t in tracks),
+                            "duration": sum(tr["duration"] for tr in tracks),
                             "tracks": tracks
                         }
         except Exception as e:
@@ -403,14 +403,14 @@ def resolve_spotify_sync(url: str) -> Optional[dict]:
     if sp:
         try:
             if item_type == 'track':
-                t = sp.track(item_id)
-                artists = ", ".join(a['name'] for a in t.get('artists', []) if a.get('name'))
-                duration = t.get('duration_ms', 0) // 1000
+                track_obj = sp.track(item_id)
+                artists = ", ".join(a['name'] for a in track_obj.get('artists', []) if a.get('name'))
+                duration = track_obj.get('duration_ms', 0) // 1000
                 thumb = ''
-                if t.get('album', {}).get('images'):
-                    thumb = t['album']['images'][0].get('url', '')
-                title = t.get('name', '未知標題')
-                spotify_url = t.get('external_urls', {}).get('spotify', f"https://open.spotify.com/track/{item_id}")
+                if track_obj.get('album', {}).get('images'):
+                    thumb = track_obj['album']['images'][0].get('url', '')
+                title = track_obj.get('name', '未知標題')
+                spotify_url = track_obj.get('external_urls', {}).get('spotify', f"https://open.spotify.com/track/{item_id}")
                 return {
                     'type': 'track',
                     'title': title,
@@ -433,16 +433,16 @@ def resolve_spotify_sync(url: str) -> Optional[dict]:
                 tracks = []
                 items = pl.get('tracks', {}).get('items', [])
                 for item in items[:200]:
-                    t = item.get('track')
-                    if not t or not t.get('name'):
+                    track_obj = item.get('track')
+                    if not track_obj or not track_obj.get('name'):
                         continue
-                    t_title = t.get('name')
-                    t_artist = ", ".join(a['name'] for a in t.get('artists', []) if a.get('name'))
-                    t_dur = t.get('duration_ms', 0) // 1000
+                    t_title = track_obj.get('name')
+                    t_artist = ", ".join(a['name'] for a in track_obj.get('artists', []) if a.get('name'))
+                    t_dur = track_obj.get('duration_ms', 0) // 1000
                     t_thumb = ''
-                    if t.get('album', {}).get('images'):
-                        t_thumb = t['album']['images'][0].get('url', '')
-                    t_url = t.get('external_urls', {}).get('spotify', f"https://open.spotify.com/track/{t.get('id', '')}")
+                    if track_obj.get('album', {}).get('images'):
+                        t_thumb = track_obj['album']['images'][0].get('url', '')
+                    t_url = track_obj.get('external_urls', {}).get('spotify', f"https://open.spotify.com/track/{track_obj.get('id', '')}")
                     tracks.append({
                         'title': t_title,
                         'artist': t_artist,
@@ -456,7 +456,7 @@ def resolve_spotify_sync(url: str) -> Optional[dict]:
                     'title': pl_title,
                     'artist': '',
                     'thumbnail': pl_thumb,
-                    'duration': sum(t['duration'] for t in tracks),
+                    'duration': sum(tr['duration'] for tr in tracks),
                     'tracks': tracks
                 }
             elif item_type == 'album':
@@ -466,13 +466,13 @@ def resolve_spotify_sync(url: str) -> Optional[dict]:
                 album_artist = ", ".join(a['name'] for a in album.get('artists', []) if a.get('name'))
                 tracks = []
                 items = album.get('tracks', {}).get('items', [])
-                for t in items[:200]:
-                    if not t or not t.get('name'):
+                for track_obj in items[:200]:
+                    if not track_obj or not track_obj.get('name'):
                         continue
-                    t_title = t.get('name')
-                    t_artist = ", ".join(a['name'] for a in t.get('artists', []) if a.get('name')) or album_artist
-                    t_dur = t.get('duration_ms', 0) // 1000
-                    t_url = t.get('external_urls', {}).get('spotify', f"https://open.spotify.com/track/{t.get('id', '')}")
+                    t_title = track_obj.get('name')
+                    t_artist = ", ".join(a['name'] for a in track_obj.get('artists', []) if a.get('name')) or album_artist
+                    t_dur = track_obj.get('duration_ms', 0) // 1000
+                    t_url = track_obj.get('external_urls', {}).get('spotify', f"https://open.spotify.com/track/{track_obj.get('id', '')}")
                     tracks.append({
                         'title': t_title,
                         'artist': t_artist,
@@ -486,7 +486,7 @@ def resolve_spotify_sync(url: str) -> Optional[dict]:
                     'title': album_title,
                     'artist': album_artist,
                     'thumbnail': album_thumb,
-                    'duration': sum(t['duration'] for t in tracks),
+                    'duration': sum(tr['duration'] for tr in tracks),
                     'tracks': tracks
                 }
         except Exception as e:
@@ -555,7 +555,7 @@ def resolve_spotify_sync(url: str) -> Optional[dict]:
                         'title': title or 'Spotify 播放清單',
                         'artist': artist,
                         'thumbnail': thumb,
-                        'duration': sum(t['duration'] for t in tracks),
+                        'duration': sum(tr['duration'] for tr in tracks),
                         'tracks': tracks
                     }
             elif title:
@@ -1396,17 +1396,17 @@ def register_slash_commands(primary_bot: commands.Bot):
                 playlist_thumb = spotify_res.get('thumbnail', '')
                 added_count = 0
 
-                for t in tracks[:200]:
-                    t_title = t.get('title', '未知歌曲')
-                    t_artist = t.get('artist', '')
+                for track_item in tracks[:200]:
+                    t_title = track_item.get('title', '未知歌曲')
+                    t_artist = track_item.get('artist', '')
                     title_str = f"{t_title} - {t_artist}" if t_artist else t_title
                     search_q = f"ytsearch1:{t_title} {t_artist}".strip()
                     song = Song({
                         'title': title_str,
-                        'webpage_url': t.get('url') or 查詢,
+                        'webpage_url': track_item.get('url') or 查詢,
                         'url': search_q,
-                        'duration': t.get('duration', 0),
-                        'thumbnail': t.get('thumbnail') or playlist_thumb,
+                        'duration': track_item.get('duration', 0),
+                        'thumbnail': track_item.get('thumbnail') or playlist_thumb,
                         'uploader': t_artist or 'Spotify'
                     }, interaction.user)
                     state.queue.append(song)
@@ -1430,9 +1430,9 @@ def register_slash_commands(primary_bot: commands.Bot):
                     await play_next(selected_bot, bot_guild)
                 return
 
-            t = spotify_res['tracks'][0]
-            t_title = t.get('title', '未知歌曲')
-            t_artist = t.get('artist', '')
+            track_item = spotify_res['tracks'][0]
+            t_title = track_item.get('title', '未知歌曲')
+            t_artist = track_item.get('artist', '')
             title_str = f"{t_title} - {t_artist}" if t_artist else t_title
             search_q = f"ytsearch1:{t_title} {t_artist}".strip()
 
@@ -1465,11 +1465,11 @@ def register_slash_commands(primary_bot: commands.Bot):
                 return
 
             yt_data['title'] = title_str
-            yt_data['webpage_url'] = t.get('url') or 查詢
-            if t.get('thumbnail'):
-                yt_data['thumbnail'] = t['thumbnail']
-            if t.get('duration'):
-                yt_data['duration'] = t['duration']
+            yt_data['webpage_url'] = track_item.get('url') or 查詢
+            if track_item.get('thumbnail'):
+                yt_data['thumbnail'] = track_item['thumbnail']
+            if track_item.get('duration'):
+                yt_data['duration'] = track_item['duration']
             yt_data['uploader'] = t_artist or 'Spotify'
 
             song = Song(yt_data, interaction.user)
