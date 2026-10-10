@@ -17,10 +17,8 @@ import ssl
 from i18n import t, GUILD_LANGUAGES, SUPPORTED_LANGUAGES, resolve_locale
 from lyrics import get_lyrics
 
-# 載入環境變數
 load_dotenv()
 
-# 商業級 Lavalink v4 (Wavelink) 模組相容載入
 try:
     import wavelink
     HAS_WAVELINK = True
@@ -31,14 +29,12 @@ except ImportError:
 LAVALINK_URI = os.getenv("LAVALINK_URI", "").strip()
 LAVALINK_PASSWORD = os.getenv("LAVALINK_PASSWORD", "youshallnotpass").strip()
 
-# 讀取 1 ~ 5 號機器人的 Token
 TOKENS = []
 for i in range(1, 6):
     t_val = os.getenv(f"BOT_TOKEN_{i}")
     if t_val and t_val.strip() and t_val != "YOUR_BOT_TOKEN_HERE" and not t_val.startswith("YOUR_BOT_TOKEN_"):
         TOKENS.append((i, t_val.strip()))
 
-# 若未設定 BOT_TOKEN_1，但有設定舊版 DISCORD_TOKEN 或 BOT_TOKEN
 if not TOKENS:
     legacy = os.getenv("DISCORD_TOKEN") or os.getenv("BOT_TOKEN") or os.getenv("TOKEN")
     if legacy and legacy.strip() and legacy != "YOUR_BOT_TOKEN_HERE" and not legacy.startswith("YOUR_BOT_TOKEN_"):
@@ -46,7 +42,6 @@ if not TOKENS:
 
 COOKIE_FILE = os.path.join(os.path.dirname(__file__), "cookies.txt")
 
-# 商業級 DSP 濾鏡與重低音預設 (支援 Lavalink 32-bit 浮點 DSP 與原生 FFmpeg 雙引擎)
 BASSBOOST_PRESETS = {
     "off": {"label": "❌ 關閉", "db": 0, "ffmpeg": None, "gain": 0.0},
     "low": {"label": "🍃 輕微低音 (+4dB)", "db": 4, "ffmpeg": "bass=g=4:f=110:w=0.6", "gain": 0.15},
@@ -82,8 +77,7 @@ def get_ytdl_opts(extract_flat: bool = False, noplaylist: bool = True) -> dict:
         'default_search': 'ytsearch',
         'source_address': '0.0.0.0',
         'socket_timeout': 10,
-        # YouTube 抗封鎖機制：模擬真實 Web/Android 端，防 403 / 429 機房攔截
-        'extractor_args': {
+         'extractor_args': {
             'youtube': {
                 'player_client': ['android', 'web'],
                 'skip': ['hls', 'dash']
@@ -99,7 +93,6 @@ def get_ytdl_opts(extract_flat: bool = False, noplaylist: bool = True) -> dict:
         opts['cookiefile'] = COOKIE_FILE
     return opts
 
-# FFmpeg 串流參數 (極速啟播、防斷流、限制單執行緒避免 CPU 飆高)
 def get_ffmpeg_options(state: 'GuildMusicState') -> dict:
     before = '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -probesize 32k -analyzeduration 0'
     filters = []
@@ -110,8 +103,7 @@ def get_ffmpeg_options(state: 'GuildMusicState') -> dict:
     if eq:
         filters.append(eq)
 
-    # -threads 1: 限制單個 FFmpeg 程序執行緒為 1，避免多機五房全開時榨乾伺服器 CPU
-    if filters:
+     if filters:
         opt = f"-threads 1 -vn -af \"{','.join(filters)}\""
     else:
         opt = "-threads 1 -vn"
@@ -165,7 +157,6 @@ def _extract_media_info(data: Optional[dict]) -> Tuple[Optional[str], Optional[s
                 break
 
     url = target.get('url')
-    # 若頂層無直接 url，從 formats 中挑選可用之音訊串流
     if not url and 'formats' in target and target['formats']:
         audio_formats = [f for f in target['formats'] if f.get('acodec') != 'none' and f.get('url')]
         if audio_formats:
@@ -177,7 +168,7 @@ def _extract_media_info(data: Optional[dict]) -> Tuple[Optional[str], Optional[s
     return url, thumb, dur
 
 def extract_stream_url_sync(song_url: str, song_title: str) -> Tuple[Optional[str], Optional[str], int]:
-    """獲取音訊串流，支援 YouTube 直連、搜尋、Spotify 轉譯與 SoundCloud 備援"""
+    """獲取音訊串流"""
     # 1. 若非 Spotify 網址，優先嘗試直接提取（適用於 YouTube 影片網址或已有的 search 查詢）
     if not ("spotify.com" in song_url or song_url.startswith("spotify:")):
         try:
@@ -217,9 +208,6 @@ def extract_stream_url_sync(song_url: str, song_title: str) -> Tuple[Optional[st
 
     return None, None, 0
 
-# ==========================================
-# Spotify 解析與音訊橋接模組 (Zero-Config + 官方 API 雙模支援)
-# ==========================================
 
 SPOTIFY_URL_REGEX = re.compile(
     r'(?:https?://(?:open\.)?spotify\.com/(?:intl-[a-zA-Z-]+/)?|spotify:)(track|playlist|album|artist)[:/]([a-zA-Z0-9]+)'
@@ -248,7 +236,6 @@ def get_spotify_client():
 
 def parse_spotify_html(html: str, item_type: str, item_id: str) -> Optional[dict]:
     """從 Spotify Embed 頁面中解析曲目/播放清單/專輯中繼資料"""
-    # 1. 解析 Next.js __NEXT_DATA__ JSON
     match = re.search(r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>', html, re.DOTALL)
     if match:
         try:
@@ -348,7 +335,6 @@ def parse_spotify_html(html: str, item_type: str, item_id: str) -> Optional[dict
         except Exception as e:
             print(f"[Spotify Parse] JSON 解析錯誤: {e}")
 
-    # 2. OpenGraph Meta 標籤備援
     og_title_m = re.search(r'<meta\s+property=["\']og:title["\']\s+content=["\']([^"\']+)["\']', html)
     og_desc_m = re.search(r'<meta\s+property=["\']og:description["\']\s+content=["\']([^"\']+)["\']', html)
     og_img_m = re.search(r'<meta\s+property=["\']og:image["\']\s+content=["\']([^"\']+)["\']', html)
@@ -420,8 +406,7 @@ def resolve_spotify_sync(url: str) -> Optional[dict]:
     item_type = m.group(1)
     item_id = m.group(2)
 
-    # 1. 官方 API (若用戶有在 .env 提供 SPOTIFY_CLIENT_ID / SECRET)
-    sp = get_spotify_client()
+   sp = get_spotify_client()
     if sp:
         try:
             if item_type == 'track':
@@ -514,7 +499,6 @@ def resolve_spotify_sync(url: str) -> Optional[dict]:
         except Exception as e:
             print(f"[Spotify API] 官方 API 解析失敗: {e}，自動切換至爬蟲模式...")
 
-    # 2. 免憑證 Embed 爬蟲模式
     embed_url = f"https://open.spotify.com/embed/{item_type}/{item_id}"
     try:
         html = fetch_spotify_html_sync(embed_url)
@@ -524,7 +508,6 @@ def resolve_spotify_sync(url: str) -> Optional[dict]:
     except Exception as e:
         print(f"[Spotify Embed] Embed 爬蟲解析失敗: {e}")
 
-    # 3. 免憑證 oEmbed 備援 (單曲)
     if item_type == 'track':
         try:
             oembed_data = fetch_spotify_oembed_sync(f"https://open.spotify.com/track/{item_id}")
@@ -550,7 +533,6 @@ def resolve_spotify_sync(url: str) -> Optional[dict]:
         except Exception as e:
             print(f"[Spotify oEmbed] oEmbed 解析失敗: {e}")
 
-    # 4. yt-dlp flat 提取備援
     try:
         ytdl_res = extract_spotify_ytdl_sync(url)
         if ytdl_res:
