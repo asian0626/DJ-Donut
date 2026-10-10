@@ -12,7 +12,7 @@
 **A Discord music bot cluster for managing multiple voice rooms.**  
 **Run 1 to 5 bots in a single process, with independent playback in up to five voice rooms.**
 
-[Invite Bots](#official-bots--實作機器人邀請) • [Features](#key-features--核心功能) • [Commands](#slash-commands-reference--斜線指令一覽) • [Quick Start](#quick-start--快速開始) • [Audio Settings](#audio-settings--音訊設定) • [License](#license)
+[Invite Bots](#official-bots--實作機器人邀請) • [Features](#key-features--核心功能) • [Commands](#slash-commands-reference--斜線指令一覽) • [Quick Start](#quick-start--快速開始) • [Audio Settings](#audio-settings--音訊設定) • [Feedback](#support--feedback--問題回饋與優化方案) • [License](#license)
 
 </div>
 
@@ -207,6 +207,15 @@ flowchart TD
 - **Extractor**: `yt-dlp` (Opus direct stream selector + Android/Web client bypass headers)
 - **Lyrics Engine**: LRCLIB synchronized API + Netease fallback
 - **i18n**: Built-in 6-language locale resolver (`en`, `zh-TW`, `zh-CN`, `ja`, `ko`, `es`)
+
+---
+
+## Support & Feedback / 問題回饋與優化方案
+
+若在使用過程中有任何問題、故障回報或效能優化方案，歡迎隨時聯絡：
+
+- **電子郵件 (Email)**: [ian986260903@a1365.pro](mailto:ian986260903@a1365.pro)
+- **GitHub Issues**: [提交 Issue / 功能建議](https://github.com/asian0626/DJ-Donut/issues)
 
 ---
 
