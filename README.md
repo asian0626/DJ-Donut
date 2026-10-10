@@ -1,4 +1,4 @@
-# 🍩 DJ Donut — Discord Multi-Room Music Bot Cluster (多房間音樂機器人矩陣)
+#  DJ Donut — Discord Multi-Room Music Bot Cluster (多房間音樂機器人矩陣)
 
 <div align="center">
 
