@@ -214,7 +214,7 @@ flowchart TD
 
 若在使用過程中有任何問題、故障回報或效能優化方案，歡迎隨時聯絡：
 
-- **電子郵件 (Email)**: [ian986260903@a1365.pro](mailto:ab21311@365mso.com)
+- **電子郵件 (Email)**: [ab21311@365mso.com](mailto:ab21311@365mso.com)
 - **GitHub Issues**: [提交 Issue / 功能建議](https://github.com/asian0626/DJ-Donut/issues)
 
 ---
