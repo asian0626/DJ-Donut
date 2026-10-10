@@ -45,3 +45,7 @@ Thumbs.db
 
 # Docker
 .dockerignore
+
+# Cache
+.cache
+.cache*

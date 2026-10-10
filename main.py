@@ -219,7 +219,23 @@ def get_spotify_client():
         try:
             import spotipy
             from spotipy.oauth2 import SpotifyClientCredentials
-            auth_mgr = SpotifyClientCredentials(client_id=cid.strip(), client_secret=csecret.strip())
+            try:
+                from spotipy.cache_handler import MemoryCacheHandler
+                cache_handler = MemoryCacheHandler()
+            except Exception:
+                cache_handler = None
+
+            if cache_handler:
+                auth_mgr = SpotifyClientCredentials(
+                    client_id=cid.strip(),
+                    client_secret=csecret.strip(),
+                    cache_handler=cache_handler
+                )
+            else:
+                auth_mgr = SpotifyClientCredentials(
+                    client_id=cid.strip(),
+                    client_secret=csecret.strip()
+                )
             _spotify_client = spotipy.Spotify(auth_manager=auth_mgr)
             print("[Spotify API] 成功初始化官方 Spotify API 客戶端！")
         except ImportError:
