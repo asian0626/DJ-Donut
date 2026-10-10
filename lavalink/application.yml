@@ -1,0 +1,89 @@
+server:
+  port: 2333
+  address: 0.0.0.0
+  http2:
+    enabled: true
+
+lavalink:
+  plugins:
+    - dependency: "dev.lavalink.youtube:youtube-plugin:1.11.4"
+      repository: "https://maven.lavalink.dev/releases"
+    - dependency: "com.github.topi314.lavasrc:lavasrc-plugin:4.3.0"
+      repository: "https://maven.lavalink.dev/releases"
+    - dependency: "com.github.topi314.sponsorblock:sponsorblock-plugin:3.0.1"
+      repository: "https://maven.lavalink.dev/releases"
+
+  server:
+    password: "youshallnotpass"
+    sources:
+      youtube: false # 由 dev.lavalink.youtube 接管
+      bandcamp: true
+      soundcloud: true
+      twitch: true
+      vimeo: true
+      http: true
+      local: false
+
+    filters: # 啟用 15 頻段 32-bit DSP 等化器與即時音效
+      volume: true
+      equalizer: true
+      karaoke: true
+      timescale: true
+      tremolo: true
+      vibrato: true
+      distortion: true
+      rotation: true
+      channelMix: true
+      lowPass: true
+
+    bufferDurationMs: 400            # 音訊發送緩衝 (ms)
+    frameBufferDurationMs: 5000      # 幀緩衝時長 (5 秒防斷流)
+    opusEncodingQuality: 10          # 最高編碼品質 (0-10)
+    resamplingQuality: HIGH          # 重取樣最高精度
+    trackStuckThresholdMs: 10000     # 卡歌自動恢復閥值
+    useSeekGhosting: true            # 快進快退平滑淡入淡出
+    youtubePlaylistLoadLimit: 200    # 歌單最大載入曲目
+    playerUpdateInterval: 5          # 狀態心跳間隔 (秒)
+
+plugins:
+  youtube:
+    enabled: true
+    allowSearch: true
+    allowDirectVideoIds: true
+    allowDirectPlaylistIds: true
+    clients:
+      - MUSIC
+      - ANDROID
+      - WEB
+    oauth:
+      enabled: false # 若伺服器機房 IP 被擋，可設為 true 依指示綁定 YouTube 帳號
+
+  lavasrc:
+    providers:
+      - "ytsearch:\"%ISRC%\""
+      - "ytsearch:%QUERY%"
+    sources:
+      spotify: true
+      applemusic: true
+      deezer: true
+      yandexmusic: false
+    spotify:
+      clientId: "" # 選填，可填入與 .env 相同的 Spotify Client ID
+      clientSecret: ""
+      countryCode: "TW"
+      playlistLoadLimit: 200
+      albumLoadLimit: 100
+
+  sponsorblock:
+    categories: ["sponsor", "intro", "outro", "interaction"]
+
+metrics:
+  prometheus:
+    enabled: false
+
+logging:
+  file:
+    path: ./logs/lavalink.log
+  level:
+    root: INFO
+    lavalink: INFO

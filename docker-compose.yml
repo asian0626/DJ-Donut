@@ -1,0 +1,33 @@
+version: '3.8'
+
+services:
+  # Discord Music Bot Multi-Room Cluster
+  music-bot:
+    build: .
+    container_name: discord-music-bot-cluster
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - ./.env:/app/.env:ro
+    depends_on:
+      lavalink:
+        condition: service_healthy
+
+  # Optional: Embedded High-Performance Lavalink v4 Audio Node
+  lavalink:
+    image: ghcr.io/lavalink-devs/lavalink:4
+    container_name: lavalink-audio-node
+    restart: unless-stopped
+    environment:
+      - _JAVA_OPTIONS=-Xmx1G
+    volumes:
+      - ./lavalink/application.yml:/opt/Lavalink/application.yml:ro
+    ports:
+      - "2333:2333"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:2333/version || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
