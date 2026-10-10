@@ -26,7 +26,7 @@
 | :--- | :--- | :--- |
 | **DJ Donut 1 號 (主節點)** | [點此邀請 1 號機器人](https://discord.com/oauth2/authorize?client_id=1549028983641743462&permissions=8&integration_type=0&scope=bot) | 管理員權限 (`permissions=8`) |
 | **DJ Donut 2 號** | [點此邀請 2 號機器人](https://discord.com/oauth2/authorize?client_id=1549258600155979956&permissions=8&integration_type=0&scope=bot) | 管理員權限 (`permissions=8`) |
-| **DJ Donut 3 號** | [點此邀請 3 號機器人](https://discord.com/oauth2/authorize?client_id=1549259098761990184&permissions=0&integration_type=0&scope=bot) | 一般邀請 (`permissions=0`) *(可選 [管理員邀請](https://discord.com/oauth2/authorize?client_id=1549259098761990184&permissions=8&integration_type=0&scope=bot))* |
+| **DJ Donut 3 號** | [點此邀請 3 號機器人](https://discord.com/oauth2/authorize?client_id=1549259098761990184&permissions=8&integration_type=0&scope=bot) | 管理員權限 (`permissions=8`) |
 | **DJ Donut 4 號** | [點此邀請 4 號機器人](https://discord.com/oauth2/authorize?client_id=1549259563646062743&permissions=8&integration_type=0&scope=bot) | 管理員權限 (`permissions=8`) |
 | **DJ Donut 5 號** | [點此邀請 5 號機器人](https://discord.com/oauth2/authorize?client_id=1549259919696592976&permissions=8&integration_type=0&scope=bot) | 管理員權限 (`permissions=8`) |
 
