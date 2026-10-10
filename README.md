@@ -24,11 +24,11 @@
 
 | 機器人節點 | 邀請連結 (OAuth2 URL) | 權限設定 |
 | :--- | :--- | :--- |
-| **DJ Donut 1 號 (主節點)** | [點此邀請 1 號機器人](https://discord.com/oauth2/authorize?client_id=1549028983641743462&permissions=8&integration_type=0&scope=bot) | 管理員權限 (`permissions=8`) |
-| **DJ Donut 2 號** | [點此邀請 2 號機器人](https://discord.com/oauth2/authorize?client_id=1549258600155979956&permissions=8&integration_type=0&scope=bot) | 管理員權限 (`permissions=8`) |
-| **DJ Donut 3 號** | [點此邀請 3 號機器人](https://discord.com/oauth2/authorize?client_id=1549259098761990184&permissions=8&integration_type=0&scope=bot) | 管理員權限 (`permissions=8`) |
-| **DJ Donut 4 號** | [點此邀請 4 號機器人](https://discord.com/oauth2/authorize?client_id=1549259563646062743&permissions=8&integration_type=0&scope=bot) | 管理員權限 (`permissions=8`) |
-| **DJ Donut 5 號** | [點此邀請 5 號機器人](https://discord.com/oauth2/authorize?client_id=1549259919696592976&permissions=8&integration_type=0&scope=bot) | 管理員權限 (`permissions=8`) |
+| **DJ Donut 1 ** | [DJ Donut 1](https://discord.com/oauth2/authorize?client_id=1549028983641743462&permissions=8&integration_type=0&scope=bot) | 管理員權限 (`permissions=8`) |
+| **DJ Donut 2 ** | [DJ Donut 2](https://discord.com/oauth2/authorize?client_id=1549258600155979956&permissions=8&integration_type=0&scope=bot) | 管理員權限 (`permissions=8`) |
+| **DJ Donut 3 ** | [DJ Donut 3](https://discord.com/oauth2/authorize?client_id=1549259098761990184&permissions=8&integration_type=0&scope=bot) | 管理員權限 (`permissions=8`) |
+| **DJ Donut 4 ** | [DJ Donut 4](https://discord.com/oauth2/authorize?client_id=1549259563646062743&permissions=8&integration_type=0&scope=bot) | 管理員權限 (`permissions=8`) |
+| **DJ Donut 5 ** | [DJ Donut 5](https://discord.com/oauth2/authorize?client_id=1549259919696592976&permissions=8&integration_type=0&scope=bot) | 管理員權限 (`permissions=8`) |
 
 > 💡 **多房間分流運作說明**：
 > - 只要將多隻機器人邀請至同一伺服器，使用者在不同語音房輸入 `/play` 時，系統會**自動指派空閒的機器人進房**，實現多個房間同時獨立播放音樂！
