@@ -1,11 +1,3 @@
-# -*- coding: utf-8 -*-
-"""
-Lyrics Retrieval Engine for Discord Music Bot
-Fetches synchronized and plain lyrics via LRCLIB (open-source public database)
-with automatic fallback to Netease Cloud Music.
-Zero API-key required!
-"""
-
 import urllib.request
 import urllib.parse
 import json
@@ -15,7 +7,6 @@ from typing import Optional, Tuple, Dict, Any
 
 
 def _make_request(url: str, headers: Optional[Dict[str, str]] = None, timeout: float = 4.0) -> Optional[dict]:
-    """Internal helper to fetch JSON via urllib with SSL verification bypass if needed"""
     try:
         ctx = ssl.create_default_context()
         ctx.check_hostname = False
@@ -37,16 +28,11 @@ def _make_request(url: str, headers: Optional[Dict[str, str]] = None, timeout: f
 
 
 def fetch_lyrics_lrclib(track_name: str, artist_name: str = "") -> Optional[Tuple[str, str, bool]]:
-    """
-    Fetches lyrics from LRCLIB (https://lrclib.net).
-    Returns: (title_display, lyrics_text, is_synced)
-    """
     clean_title = re.sub(r'[\(\[\{].*?[\)\]\}]', '', track_name).strip()
     clean_title = re.sub(r'(official\s+video|official\s+audio|mv|lyrics|feat\..*|ft\..*)', '', clean_title, flags=re.I).strip()
     if not clean_title:
         clean_title = track_name
 
-    # 1. Exact match attempt
     if artist_name:
         params = urllib.parse.urlencode({
             'track_name': clean_title,
@@ -61,7 +47,6 @@ def fetch_lyrics_lrclib(track_name: str, artist_name: str = "") -> Optional[Tupl
                 is_synced = bool(data.get('syncedLyrics'))
                 return display_name, text.strip(), is_synced
 
-    # 2. Search query attempt
     search_q = f"{clean_title} {artist_name}".strip()
     params = urllib.parse.urlencode({'q': search_q})
     url = f"https://lrclib.net/api/search?{params}"
@@ -78,9 +63,6 @@ def fetch_lyrics_lrclib(track_name: str, artist_name: str = "") -> Optional[Tupl
 
 
 def fetch_lyrics_netease(track_name: str) -> Optional[Tuple[str, str, bool]]:
-    """
-    Fallback lyrics engine via Netease Cloud Music (excellent for Chinese, Japanese, Korean tracks).
-    """
     try:
         clean_title = re.sub(r'[\(\[\{].*?[\)\]\}]', '', track_name).strip()
         search_url = f"https://music.163.com/api/search/get/web?s={urllib.parse.quote(clean_title)}&type=1&offset=0&total=true&limit=1"
@@ -97,7 +79,6 @@ def fetch_lyrics_netease(track_name: str) -> Optional[Tuple[str, str, bool]]:
             if lyric_res:
                 lrc = lyric_res.get('lrc', {}).get('lyric', '')
                 if lrc and lrc.strip():
-                    # Check if synced
                     is_synced = bool(re.search(r'\[\d{2}:\d{2}', lrc))
                     return display_name, lrc.strip(), is_synced
     except Exception:
@@ -106,10 +87,6 @@ def fetch_lyrics_netease(track_name: str) -> Optional[Tuple[str, str, bool]]:
 
 
 def get_lyrics(track_title: str, artist_name: str = "") -> Optional[Tuple[str, str, bool]]:
-    """
-    Unified entry point for retrieving lyrics.
-    Tries LRCLIB first, then falls back to Netease.
-    """
     res = fetch_lyrics_lrclib(track_title, artist_name)
     if res:
         return res

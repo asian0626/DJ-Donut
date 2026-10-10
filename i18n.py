@@ -1,10 +1,3 @@
-# -*- coding: utf-8 -*-
-"""
-Internationalization (i18n) Module for Discord Music Bot Cluster
-Supports English (en), Traditional Chinese (zh-TW), Simplified Chinese (zh-CN),
-Japanese (ja), Korean (ko), and Spanish (es).
-"""
-
 from typing import Optional, Dict, Any
 import discord
 
@@ -19,11 +12,9 @@ SUPPORTED_LANGUAGES = {
 
 DEFAULT_LANGUAGE = 'zh-TW'
 
-# Per-guild custom language preference: guild_id -> lang_code
 GUILD_LANGUAGES: Dict[int, str] = {}
 
 TRANSLATIONS: Dict[str, Dict[str, str]] = {
-    # General / Voice Errors
     'must_join_voice': {
         'en': '❌ You must join a voice channel first to use this command!',
         'zh-TW': '❌ 你必須先加入一個語音頻道才能使用此指令！',
@@ -73,7 +64,6 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         'es': '❌ 【{bot_name}】 Error al conectar al canal de voz: `{error}`'
     },
 
-    # Playback / Queue
     'song_queued': {
         'en': '📥 【{bot_name}】 Added to Queue',
         'zh-TW': '📥 【{bot_name}】 已加入待播歌單',
@@ -131,7 +121,6 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         'es': '🎵 【{bot_name}】 ¡Todas las canciones de la cola han terminado!'
     },
 
-    # Controls
     'skipped': {
         'en': '⏭️ 【{bot_name}】 Skipped current track!',
         'zh-TW': '⏭️ 【{bot_name}】 已跳過當前歌曲！',
@@ -205,7 +194,6 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         'es': '¡Actualmente no se está reproduciendo ninguna canción!'
     },
 
-    # Embed Fields
     'field_duration': {
         'en': '⏱️ Duration',
         'zh-TW': '⏱️ 時長',
@@ -367,7 +355,6 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         'es': 'Nodo: {node_name} | ⚠️ La tasa de bits es baja ({bitrate}k). ¡Los administradores pueden usar /bitrate!'
     },
 
-    # New Feature: Autoplay
     'autoplay_enabled': {
         'en': '📻 【{bot_name}】 Autoplay mode is now **ENABLED**! (Infinite smart recommendations when queue ends)',
         'zh-TW': '📻 【{bot_name}】 智慧自動接歌模式已 **開啟**！(歌單結束後自動推薦風格相似歌曲)',
@@ -393,7 +380,6 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         'es': '📻 **[Radio Auto]** Siguiente pista recomendada: **[{title}]({url})**'
     },
 
-    # New Feature: 24/7 Mode
     'mode_247_enabled': {
         'en': '🛡️ 【{bot_name}】 24/7 Stay-in-Room mode is **ENABLED**! Bot will remain in voice channel permanently.',
         'zh-TW': '🛡️ 【{bot_name}】 24/7 常駐模式已 **開啟**！機器人將永久停留在語音房內待命。',
@@ -411,7 +397,6 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         'es': '🛡️ 【{bot_name}】 El modo 24/7 está **DESACTIVADO**.'
     },
 
-    # New Feature: Lyrics
     'lyrics_searching': {
         'en': '🔍 Searching lyrics for **{title}**...',
         'zh-TW': '🔍 正在搜尋 **{title}** 的即時歌詞...',
@@ -437,7 +422,6 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         'es': '📜 Letras — {title}'
     },
 
-    # Language Switch
     'language_updated': {
         'en': '🌐 Server default language set to: **{lang_name}**!',
         'zh-TW': '🌐 伺服器預設語言已更新為：**{lang_name}**！',
@@ -447,7 +431,6 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         'es': '🌐 ¡Idioma predeterminado del servidor establecido en: **{lang_name}**!'
     },
 
-    # Status Dashboard
     'status_title': {
         'en': '🎛️ Multi-Room Music Bot Cluster — Live Dashboard',
         'zh-TW': '🎛️ 多房間音樂機器人矩陣 — 即時狀態總覽',
@@ -505,7 +488,6 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         'es': 'El administrador debe invitarlo vía OAuth2 para servicio multi-sala.'
     },
 
-    # Bitrate / Audio
     'bitrate_title': {
         'en': '🎚️ Voice Channel Bitrate Updated',
         'zh-TW': '🎚️ 語音房音質位元率已更新',
@@ -530,13 +512,6 @@ def resolve_locale(
     guild_id: Optional[int] = None,
     preferred_lang: Optional[str] = None
 ) -> str:
-    """
-    Intelligently resolves the target language in priority order:
-    1. Explicit preferred_lang
-    2. Guild custom setting in GUILD_LANGUAGES
-    3. Interaction user locale (from Discord client)
-    4. Default fallback (DEFAULT_LANGUAGE)
-    """
     if preferred_lang and preferred_lang in SUPPORTED_LANGUAGES:
         return preferred_lang
 
@@ -569,9 +544,6 @@ def t(
     lang: Optional[str] = None,
     **kwargs: Any
 ) -> str:
-    """
-    Translates a key into the resolved language, supporting string formatting.
-    """
     target_lang = resolve_locale(interaction=interaction, guild_id=guild_id, preferred_lang=lang)
     entry = TRANSLATIONS.get(key)
     if not entry:

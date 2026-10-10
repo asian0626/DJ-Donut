@@ -64,10 +64,9 @@ EQ_PRESETS = {
 
 def get_ytdl_opts(extract_flat: bool = False, noplaylist: bool = True) -> dict:
     opts = {
-        # 優先抓取最高碼率 Opus 160k (YouTube format 251) 或高品質無損音源
         'format': 'bestaudio[ext=webm][acodec=opus][abr>=160]/bestaudio[format_id=251]/bestaudio/best',
         'extractaudio': True,
-        'audioquality': '0',  # 0 代表最高品質 (VBR)
+        'audioquality': '0',
         'restrictfilenames': True,
         'noplaylist': noplaylist,
         'nocheckcertificate': True,
@@ -134,7 +133,7 @@ class GuildMusicState:
         self.queue = deque()
         self.current: Optional[Song] = None
         self.last_played: Optional[Song] = None
-        self.loop_mode: str = 'off' # 'off', 'single', 'queue'
+        self.loop_mode: str = 'off'
         self.volume: float = 1.0
         self.text_channel: Optional[discord.TextChannel] = None
         self.is_playing = False
@@ -146,7 +145,6 @@ class GuildMusicState:
         self.lang: Optional[str] = None
 
 def _extract_media_info(data: Optional[dict]) -> Tuple[Optional[str], Optional[str], int]:
-    """從 yt-dlp 字典或 entries 中提取最佳直連串流、封面與時長"""
     if not data:
         return None, None, 0
     target = data
@@ -168,8 +166,6 @@ def _extract_media_info(data: Optional[dict]) -> Tuple[Optional[str], Optional[s
     return url, thumb, dur
 
 def extract_stream_url_sync(song_url: str, song_title: str) -> Tuple[Optional[str], Optional[str], int]:
-    """獲取音訊串流"""
-    # 1. 若非 Spotify 網址，優先嘗試直接提取（適用於 YouTube 影片網址或已有的 search 查詢）
     if not ("spotify.com" in song_url or song_url.startswith("spotify:")):
         try:
             ydl = yt_dlp.YoutubeDL(get_ytdl_opts(extract_flat=False, noplaylist=True))
@@ -180,7 +176,6 @@ def extract_stream_url_sync(song_url: str, song_title: str) -> Tuple[Optional[st
         except Exception as e:
             print(f"[Extractor] 網址直接提取略過 ({song_title}): {e}")
 
-    # 2. 透過歌曲標題在 YouTube 搜尋最佳音源
     if song_title:
         try:
             print(f"[Extractor] 嘗試為【{song_title}】使用 YouTube 搜尋最佳音源...")
@@ -193,7 +188,6 @@ def extract_stream_url_sync(song_url: str, song_title: str) -> Tuple[Optional[st
         except Exception as e:
             print(f"[Extractor] YouTube 搜尋失敗 ({song_title}): {e}")
 
-        # 3. YouTube 失敗，切換至 SoundCloud 備援音源
         try:
             print(f"[Extractor] 嘗試為【{song_title}】使用 SoundCloud 備援音源...")
             sc_query = f"scsearch1:{song_title}"
@@ -235,14 +229,13 @@ def get_spotify_client():
     return _spotify_client
 
 def parse_spotify_html(html: str, item_type: str, item_id: str) -> Optional[dict]:
-    """從 Spotify Embed 頁面中解析曲目/播放清單/專輯中繼資料"""
     match = re.search(r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>', html, re.DOTALL)
     if match:
         try:
             raw_data = json.loads(match.group(1))
             page_props = raw_data.get("props", {}).get("pageProps", {})
             entity = page_props.get("state", {}).get("data", {}).get("entity") or page_props.get("entity", {})
-            
+
             if not entity:
                 def search_entity(d):
                     if isinstance(d, dict):
@@ -269,13 +262,13 @@ def parse_spotify_html(html: str, item_type: str, item_id: str) -> Optional[dict
                         artist = ", ".join(artist_names)
                     else:
                         artist = entity.get("subtitle") or ""
-                    
+
                     duration_ms = entity.get("duration") or 0
                     duration = int(duration_ms) // 1000 if duration_ms else 0
-                    
+
                     cover_sources = entity.get("coverArt", {}).get("sources", [])
                     thumb = cover_sources[0].get("url") if cover_sources else ""
-                    
+
                     if title:
                         return {
                             "type": "track",
@@ -296,11 +289,11 @@ def parse_spotify_html(html: str, item_type: str, item_id: str) -> Optional[dict
                     title = entity.get("name") or entity.get("title") or ("Spotify 播放清單" if item_type == "playlist" else "Spotify 專輯")
                     cover_sources = entity.get("coverArt", {}).get("sources", [])
                     thumb = cover_sources[0].get("url") if cover_sources else ""
-                    
+
                     track_list = entity.get("trackList") or []
                     if not track_list:
                         track_list = entity.get("tracks", {}).get("items", [])
-                    
+
                     tracks = []
                     for t in track_list:
                         t_title = t.get("title") or t.get("name")
@@ -322,7 +315,7 @@ def parse_spotify_html(html: str, item_type: str, item_id: str) -> Optional[dict
                             "url": t_url,
                             "search_query": f"{t_title} {t_artist}".strip()
                         })
-                    
+
                     if tracks:
                         return {
                             "type": item_type,
@@ -338,7 +331,7 @@ def parse_spotify_html(html: str, item_type: str, item_id: str) -> Optional[dict
     og_title_m = re.search(r'<meta\s+property=["\']og:title["\']\s+content=["\']([^"\']+)["\']', html)
     og_desc_m = re.search(r'<meta\s+property=["\']og:description["\']\s+content=["\']([^"\']+)["\']', html)
     og_img_m = re.search(r'<meta\s+property=["\']og:image["\']\s+content=["\']([^"\']+)["\']', html)
-    
+
     if og_title_m:
         title = og_title_m.group(1).strip()
         artist = ""
@@ -591,7 +584,6 @@ async def resolve_spotify(url: str) -> Optional[dict]:
     return await loop.run_in_executor(None, lambda: resolve_spotify_sync(url))
 
 def is_vc_connected(vc) -> bool:
-    """兼容量 discord.VoiceClient 與 wavelink.Player 的連線狀態檢查"""
     if not vc:
         return False
     if hasattr(vc, 'connected'):
@@ -601,7 +593,6 @@ def is_vc_connected(vc) -> bool:
     return hasattr(vc, 'channel') and vc.channel is not None
 
 def is_vc_playing(vc) -> bool:
-    """兼容量 discord.VoiceClient 與 wavelink.Player 的播放中狀態檢查"""
     if not vc:
         return False
     if hasattr(vc, 'playing'):
@@ -611,7 +602,6 @@ def is_vc_playing(vc) -> bool:
     return False
 
 def is_vc_paused(vc) -> bool:
-    """兼容量 discord.VoiceClient 與 wavelink.Player 的暫停中狀態檢查"""
     if not vc:
         return False
     if hasattr(vc, 'paused'):
@@ -621,11 +611,9 @@ def is_vc_paused(vc) -> bool:
     return False
 
 def is_vc_active(vc) -> bool:
-    """檢查是否正在播放中或暫停中"""
     return is_vc_playing(vc) or is_vc_paused(vc)
 
 async def safe_pause_resume(vc) -> str:
-    """兼容量 Lavalink Player 與原生 VoiceClient 的暫停/恢復操作"""
     if not vc:
         return "none"
     if hasattr(vc, 'paused'):
@@ -652,7 +640,6 @@ async def safe_pause_resume(vc) -> str:
     return "none"
 
 async def safe_stop(vc):
-    """兼容量 Lavalink Player 與原生 VoiceClient 的停止"""
     if not vc:
         return
     try:
@@ -665,7 +652,6 @@ async def safe_stop(vc):
         print(f"[Safe Stop Error] {e}")
 
 async def safe_disconnect(vc):
-    """安全中斷連線"""
     if not vc:
         return
     try:
@@ -742,7 +728,6 @@ def build_nowplaying_embed(bot: 'MusicNodeBot', song: Song, state: GuildMusicSta
     guild_lang = lang or resolve_locale(guild_id=state.guild_id)
     loop_str = t(f'loop_{state.loop_mode}', lang=guild_lang)
 
-    # 取得當前頻道位元率資訊
     guild = bot.get_guild(state.guild_id)
     vc = guild.voice_client if guild else None
     bitrate_str = "128 kbps"
@@ -809,7 +794,6 @@ def build_queue_embed(bot: 'MusicNodeBot', state: GuildMusicState, lang: Optiona
     return embed
 
 async def check_lavalink_health(uri: str, password: str) -> bool:
-    """在連線前快速檢測 Lavalink 節點的 /v4/info，確保不是 404 HTML 或 Cloudflare 攔截"""
     if not uri:
         return False
     base_uri = uri.rstrip('/')
@@ -839,7 +823,6 @@ async def check_lavalink_health(uri: str, password: str) -> bool:
 
     return await loop.run_in_executor(None, _probe_sync)
 
-# 全域機器人節點管理器清單
 NODE_BOTS: List['MusicNodeBot'] = []
 
 class MusicNodeBot(commands.Bot):
@@ -853,7 +836,6 @@ class MusicNodeBot(commands.Bot):
         self.states: Dict[int, GuildMusicState] = {}
         self.lavalink_connected = False
 
-        # 每個節點擁有獨立的前綴：如 !p1, !p2 或 1!play
         super().__init__(
             command_prefix=[f"{node_id}!", f"!{node_id}", "!"],
             intents=intents,
@@ -866,10 +848,8 @@ class MusicNodeBot(commands.Bot):
         return self.states[guild_id]
 
     async def setup_hook(self):
-        # 連接商業級 Lavalink v4 節點 (若有配置)
         if HAS_WAVELINK and LAVALINK_URI:
             if len(TOKENS) > 1:
-                # Wavelink Pool 在單一進程中為單例設計，多機矩陣時需使用各自獨立原生語音通道
                 self.lavalink_connected = False
                 if self.node_id == 1:
                     print(f"[{self.node_name}] 🎛️ 檢測到啟用多機矩陣 ({len(TOKENS)} 隻機器人)，為確保各語音房 100% 獨立純淨音訊與發送無衝突，全面啟用極限調校原生獨立引擎！")
@@ -892,7 +872,6 @@ class MusicNodeBot(commands.Bot):
                     self.lavalink_connected = False
                     print(f"[{self.node_name}] ⚠️ Lavalink 節點 ({LAVALINK_URI}) 響應異常或返回非 JSON (404/403)，自動切換至極限原生獨立引擎！")
 
-        # 僅由 1 號主節點向 Discord 註冊全域斜線指令，避免指令重複顯示
         if self.node_id == 1:
             print(f"[{self.node_name}] 正在註冊統一調度斜線指令...")
             register_slash_commands(self)
@@ -917,7 +896,6 @@ class MusicNodeBot(commands.Bot):
 
     async def on_voice_state_update(self, member: discord.Member, before: discord.VoiceState, after: discord.VoiceState):
         guild = member.guild
-        # 若是本機器人自身被手動斷開連線或移出語音房，安全重置狀態
         if member.id == self.user.id and after.channel is None:
             state = self.get_state(guild.id)
             state.loop_mode = 'off'
@@ -1003,7 +981,6 @@ async def play_next(bot: MusicNodeBot, guild: discord.Guild):
     state.current = next_song
     state.is_playing = True
 
-    # 檢查是否使用 Lavalink 商業引擎播放 (Opus 直通、JDA-NAS 微秒時鐘、32-bit DSP 等化器)
     if bot.lavalink_connected and HAS_WAVELINK and hasattr(vc, 'play') and hasattr(vc, 'filters'):
         if not next_song.wavelink_track:
             try:
@@ -1055,7 +1032,6 @@ async def play_next(bot: MusicNodeBot, guild: discord.Guild):
             except Exception as e:
                 print(f"[{bot.node_name}] Lavalink 播放異常 ({e})，自動切換至極限原生獨立引擎...")
 
-    # 若當前 vc 仍為 wavelink.Player，但即將使用原生 FFmpeg 引擎播放，則切換至原生 VoiceClient
     if hasattr(vc, 'filters'):
         channel = getattr(vc, 'channel', None)
         await safe_disconnect(vc)
@@ -1070,7 +1046,6 @@ async def play_next(bot: MusicNodeBot, guild: discord.Guild):
             state.is_playing = False
             return
 
-    # 極限調校原生獨立引擎 (FFmpeg 384k Studio Pipeline + 讀前雙緩衝 + 零損失直通)
     state.active_engine = "🔥 Native Studio Engine (384k VBR)"
     loop = asyncio.get_event_loop()
     stream_url, thumbnail, duration = await loop.run_in_executor(
@@ -1095,8 +1070,7 @@ async def play_next(bot: MusicNodeBot, guild: discord.Guild):
     try:
         ffmpeg_opts = get_ffmpeg_options(state)
         source = discord.FFmpegPCMAudio(stream_url, **ffmpeg_opts)
-        
-        # 音量為 1.0 時跳過 PCM 重取樣包裝，保留 100% 原汁原味純淨無損聲底
+
         if state.volume != 1.0:
             audio_source = discord.PCMVolumeTransformer(source, volume=state.volume)
         else:
@@ -1116,7 +1090,6 @@ async def play_next(bot: MusicNodeBot, guild: discord.Guild):
             state.is_playing = False
             return
 
-        # 動態匹配語音房最高頻寬位元率 (kbps)，解鎖最高 384k 錄音室級編碼
         bitrate_kbps = 128
         if hasattr(vc, 'channel') and vc.channel and hasattr(vc.channel, 'bitrate') and vc.channel.bitrate:
             bitrate_kbps = min(384, max(64, vc.channel.bitrate // 1000))
@@ -1136,17 +1109,8 @@ async def play_next(bot: MusicNodeBot, guild: discord.Guild):
         print(f"[{bot.node_name} Play Error] 播放失敗: {e}")
         await play_next(bot, guild)
 
-# --- 智能多機調度器 (Smart Dispatcher) ---
 
 def get_bot_guild(bot: 'MusicNodeBot', guild_id: int, interaction_guild: Optional[discord.Guild] = None) -> Optional[discord.Guild]:
-    """
-    超穩健獲取 Bot 所在的 Guild 物件：
-    1. 若 interaction_guild 存在且該 bot 正好是 interaction.client，直接回傳 interaction_guild（100% 防快取穿透）
-    2. 若 interaction_guild.me.id == bot.user.id，直接回傳 interaction_guild
-    3. 查詢 bot.get_guild(guild_id)
-    4. 查詢 discord.utils.get(bot.guilds, id=guild_id)
-    5. 若為 1 號主節點且 interaction_guild.id == guild_id，保底回傳 interaction_guild
-    """
     if interaction_guild and interaction_guild.id == guild_id:
         if hasattr(bot, 'user') and bot.user and hasattr(interaction_guild, 'me') and interaction_guild.me:
             if interaction_guild.me.id == bot.user.id:
@@ -1179,21 +1143,12 @@ async def find_best_bot_for_channel(
     voice_channel: discord.VoiceChannel,
     interaction_guild: Optional[discord.Guild] = None
 ) -> Tuple[Optional['MusicNodeBot'], bool]:
-    """
-    五級智慧動態調度策略：
-    第一級（原地隊列）：機器人已在此語音房，直接沿用並加入歌單。
-    第二級（完全未連線）：挑選尚未連線到任何語音房的閒置機器人。
-    第三級（空房無人聽）：挑選所在房間已無任何真人聽眾（只有機器人或空無一人）的機器人，重新調度過來。
-    第四級（連線但已停止/空閒）：挑選已連線但在其他房間處於空閒/停止狀態 (無歌曲播放且無待播清單) 的機器人，重新調度過來。
-    第五級（全部忙碌）：若所有在線機器人皆有真人在聽且正在播放，才回傳 (None, False)。
-    """
     available_bots = []
     for b in NODE_BOTS:
         guild = await get_or_fetch_bot_guild(b, guild_id, interaction_guild)
         if guild:
             available_bots.append((b, guild))
 
-    # 究極保底：若快取未中但 interaction_guild 存在，強制納入 1 號主節點
     if not available_bots and interaction_guild and NODE_BOTS:
         available_bots.append((NODE_BOTS[0], interaction_guild))
 
@@ -1208,19 +1163,16 @@ async def find_best_bot_for_channel(
                 return v
         return None
 
-    # 第一級：機器人已在該使用者的語音房中
     for b, guild in available_bots:
         vc = get_vc(b, guild)
         if vc and is_vc_connected(vc) and hasattr(vc, 'channel') and vc.channel and vc.channel.id == voice_channel.id:
             return b, True
 
-    # 第二級：完全未連線的空閒機器人
     for b, guild in available_bots:
         vc = get_vc(b, guild)
         if not vc or not is_vc_connected(vc):
             return b, False
 
-    # 第三級：所在房間已無任何真人聽眾 (使用者皆已離開)
     for b, guild in available_bots:
         vc = get_vc(b, guild)
         if vc and is_vc_connected(vc) and hasattr(vc, 'channel') and vc.channel:
@@ -1228,7 +1180,6 @@ async def find_best_bot_for_channel(
             if len(real_listeners) == 0:
                 return b, False
 
-    # 第四級：已連線但在其他房間處於空閒/停止狀態 (無歌曲播放且無待播清單)
     for b, guild in available_bots:
         vc = get_vc(b, guild)
         state = b.get_state(guild_id)
@@ -1236,7 +1187,6 @@ async def find_best_bot_for_channel(
             if not is_vc_active(vc) and len(state.queue) == 0:
                 return b, False
 
-    # 第五級：全部機器人皆在其他房間為真實聽眾播放中
     return None, False
 
 def get_bot_in_user_room(
@@ -1244,7 +1194,6 @@ def get_bot_in_user_room(
     user_voice_channel: discord.VoiceChannel,
     interaction_guild: Optional[discord.Guild] = None
 ) -> Optional['MusicNodeBot']:
-    """找到在使用者語音房裡的那隻機器人"""
     for b in NODE_BOTS:
         guild = get_bot_guild(b, guild_id, interaction_guild)
         if guild:
@@ -1259,11 +1208,6 @@ def get_bot_in_user_room(
     return None
 
 async def get_user_voice_channel(interaction: discord.Interaction) -> Optional[discord.VoiceChannel]:
-    """
-    多重管道智慧定位使用者的語音頻道：
-    徹底解決 interaction.user.voice 為 None、Discord 快取延遲或在語音房內建文字聊天室點歌的問題！
-    """
-    # 管道 1: 直接從 interaction.user (Member) 的 voice 屬性獲取
     user_voice = getattr(interaction.user, 'voice', None)
     if user_voice and getattr(user_voice, 'channel', None):
         return user_voice.channel
@@ -1272,23 +1216,19 @@ async def get_user_voice_channel(interaction: discord.Interaction) -> Optional[d
     if not guild:
         return None
 
-    # 管道 2: 若指令是在語音房內建文字聊天室中發送 (interaction.channel 即為 VoiceChannel 或 StageChannel)
     if isinstance(interaction.channel, (discord.VoiceChannel, discord.StageChannel)):
         return interaction.channel
 
-    # 管道 3: 從 guild cache 獲取完整的 Member 物件
     member = guild.get_member(interaction.user.id)
     if member and getattr(member, 'voice', None) and member.voice.channel:
         return member.voice.channel
 
-    # 管道 4: 搜尋該伺服器內所有語音頻道 (檢查 voice_states 或 members 清單)
     for vc in guild.voice_channels:
         if hasattr(vc, 'voice_states') and interaction.user.id in vc.voice_states:
             return vc
         if hasattr(vc, 'members') and any(m.id == interaction.user.id for m in vc.members):
             return vc
 
-    # 管道 5: 透過 API fetch_member 強制向 Discord 獲取最新狀態
     try:
         fetched_member = await guild.fetch_member(interaction.user.id)
         if fetched_member and getattr(fetched_member, 'voice', None) and fetched_member.voice.channel:
@@ -1298,7 +1238,6 @@ async def get_user_voice_channel(interaction: discord.Interaction) -> Optional[d
 
     return None
 
-# --- 註冊統一斜線指令 ---
 
 def register_slash_commands(primary_bot: commands.Bot):
     tree = primary_bot.tree
@@ -1318,7 +1257,6 @@ def register_slash_commands(primary_bot: commands.Bot):
 
         guild_id = interaction.guild_id
 
-        # 決定派遣哪一隻機器人
         selected_bot: Optional[MusicNodeBot] = None
         already_in_room = False
 
@@ -1364,8 +1302,6 @@ def register_slash_commands(primary_bot: commands.Bot):
         state = selected_bot.get_state(guild_id)
         state.text_channel = interaction.channel
 
-        # 連接語音房
-        # 自動嘗試將語音頻道的位元率提升至該伺服器最高上限 (大幅提升音質與動態表現)
         try:
             max_bitrate = bot_voice_channel.guild.bitrate_limit
             if bot_voice_channel.bitrate < max_bitrate:
@@ -1379,7 +1315,6 @@ def register_slash_commands(primary_bot: commands.Bot):
                 if v.guild and v.guild.id == guild_id:
                     vc = v
                     break
-        # 智慧校驗語音連線類型 (確保 Lavalink 與 Native 引擎切換時自動適配正確的 VoiceClient)
         is_wavelink_player = HAS_WAVELINK and hasattr(vc, 'filters')
         should_be_wavelink = selected_bot.lavalink_connected and HAS_WAVELINK
 
@@ -1389,7 +1324,6 @@ def register_slash_commands(primary_bot: commands.Bot):
 
         if not vc or not is_vc_connected(vc):
             try:
-                # self_deaf=True: 拒聽其他成員語音，專用所有 UDP 頻寬發送高音質音樂，消除網路抖動
                 if should_be_wavelink:
                     try:
                         vc = await bot_voice_channel.connect(cls=wavelink.Player, self_deaf=True)
@@ -1402,8 +1336,6 @@ def register_slash_commands(primary_bot: commands.Bot):
                 await interaction.followup.send(t('connect_failed', interaction, bot_name=selected_bot.node_name, error=str(e)))
                 return
         elif hasattr(vc, 'channel') and vc.channel and vc.channel.id != voice_channel.id:
-            # 機器人正從其他空房或閒置房間被調度過來：
-            # 若非原房間，先確保停止前一個房間的播放並重置舊狀態
             if not already_in_room:
                 state.loop_mode = 'off'
                 state.current = None
@@ -1412,7 +1344,6 @@ def register_slash_commands(primary_bot: commands.Bot):
                 await safe_stop(vc)
             await vc.move_to(bot_voice_channel)
 
-        # 若啟用 Lavalink 且非 Spotify 或歌單，優先嘗試 Lavalink 原生直通搜尋
         if selected_bot.lavalink_connected and HAS_WAVELINK and not SPOTIFY_URL_REGEX.search(查詢) and not ("playlist" in 查詢.lower() or "list=" in 查詢.lower()):
             try:
                 tracks: wavelink.Search = await wavelink.Playable.search(查詢)
@@ -1451,17 +1382,14 @@ def register_slash_commands(primary_bot: commands.Bot):
             except Exception as e:
                 print(f"[Slash Play] Lavalink 直通搜尋略過 ({e})，無縫使用原生解析管線...")
 
-        # 解析歌曲或歌單
         loop = asyncio.get_event_loop()
 
-        # 優先處理 Spotify 連結 (單曲 / 播放清單 / 專輯)
         if SPOTIFY_URL_REGEX.search(查詢):
             spotify_res = await resolve_spotify(查詢)
             if not spotify_res or not spotify_res.get('tracks'):
                 await interaction.followup.send("❌ 無法解析該 Spotify 連結，請確認該歌曲或播放清單為公開狀態！")
                 return
 
-            # 若為播放清單或專輯 (或包含多首曲目)
             if spotify_res['type'] in ('playlist', 'album') or len(spotify_res['tracks']) > 1:
                 tracks = spotify_res['tracks']
                 playlist_title = spotify_res.get('title', 'Spotify 播放清單')
@@ -1502,7 +1430,6 @@ def register_slash_commands(primary_bot: commands.Bot):
                     await play_next(selected_bot, bot_guild)
                 return
 
-            # 若為 Spotify 單曲
             t = spotify_res['tracks'][0]
             t_title = t.get('title', '未知歌曲')
             t_artist = t.get('artist', '')
@@ -1570,7 +1497,6 @@ def register_slash_commands(primary_bot: commands.Bot):
                 await play_next(selected_bot, bot_guild)
             return
 
-        # 一般 YouTube / SoundCloud 處理
         is_playlist = ("playlist" in 查詢.lower()) or ("list=" in 查詢.lower())
 
         if is_playlist:
@@ -1619,7 +1545,6 @@ def register_slash_commands(primary_bot: commands.Bot):
                 await play_next(selected_bot, bot_guild)
             return
 
-        # 單曲處理
         try:
             data = await loop.run_in_executor(
                 None, lambda: yt_dlp.YoutubeDL(get_ytdl_opts(extract_flat=False, noplaylist=True)).extract_info(查詢, download=False)
@@ -2122,14 +2047,12 @@ async def main():
     print(f"🚀 正在初始化多房間音樂機器人矩陣 (共檢測到 {len(TOKENS)} 隻機器人配置)...")
     print("=" * 65)
 
-    # 實例化所有配置好的機器人節點
     tasks = []
     for node_id, token in TOKENS:
         node_bot = MusicNodeBot(node_id)
         NODE_BOTS.append(node_bot)
         tasks.append(node_bot.start(token))
 
-    # 一個進程內並發啟動所有機器人
     await asyncio.gather(*tasks)
 
 if __name__ == "__main__":
