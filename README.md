@@ -12,7 +12,7 @@
 **A Discord music bot cluster for managing multiple voice rooms.**  
 **Run 1 to 5 bots in a single process, with independent playback in up to five voice rooms.**
 
-[English Documentation](#-english-guide) • [繁體中文說明](#-繁體中文說明) • [Features](#-key-features) • [Quick Start](#-quick-start) • [Commands](#-slash-commands-reference)
+[Features](#key-features--核心功能) • [Commands](#slash-commands-reference--斜線指令一覽) • [Quick Start](#quick-start--快速開始) • [Audio Settings](#audio-settings--音訊設定) • [License](#license)
 
 </div>
 
@@ -60,7 +60,7 @@
 | Command (指令) | Parameters (參數) | Description (EN) | 說明 (繁體中文) |
 | :--- | :--- | :--- | :--- |
 | **/play** | `query`, `[bot_id]` | Smart play (Auto-dispatches idle bot or targeted bot 1~5) | 點歌（自動分配可用機器人，也可指定 1～5 號） |
-| **/autoplay** | *None* | Toggle smart autoplay radio mode when queue ends | 切換自動接歌模式模式 (歌單結束自動無縫接歌) |
+| **/autoplay** | *None* | Toggle smart autoplay radio mode when queue ends | 切換自動接歌模式 (歌單結束自動接續播放) |
 | **/lyrics** | `[song]` | View synced or plain lyrics for current / queried song | 查詢當前或指定歌曲的動態/純文字即時歌詞 |
 | **/247** | *None* | Toggle 24/7 permanent stay-in-room mode | 切換 24/7 永久常駐語音房模式 |
 | **/language** | `language` | Set server default language (en / zh-TW / ja / ko / es) | 設定伺服器預設語言 |

@@ -103,7 +103,7 @@ def get_ffmpeg_options(state: 'GuildMusicState') -> dict:
     if eq:
         filters.append(eq)
 
-     if filters:
+    if filters:
         opt = f"-threads 1 -vn -af \"{','.join(filters)}\""
     else:
         opt = "-threads 1 -vn"
@@ -406,7 +406,7 @@ def resolve_spotify_sync(url: str) -> Optional[dict]:
     item_type = m.group(1)
     item_id = m.group(2)
 
-   sp = get_spotify_client()
+    sp = get_spotify_client()
     if sp:
         try:
             if item_type == 'track':
@@ -1962,30 +1962,30 @@ def register_slash_commands(primary_bot: commands.Bot):
 
         await interaction.response.send_message(f"🎛️ 【{b.node_name}】音效濾波器已切換至：**{choice_label}**！\n*(極限原生 FFmpeg 引擎將以 384k 錄音室級編碼套用)*")
 
-    @tree.command(name="engine", description="查看當前商業級雙引擎 (Lavalink v4 / 極限原生獨立引擎) 架構狀態")
+    @tree.command(name="engine", description="查看目前音訊引擎運作狀態 (Lavalink / 原生 FFmpeg)")
     async def slash_engine(interaction: discord.Interaction):
         embed = discord.Embed(
-            title="⚡ 商業級雙引擎 (Dual-Engine) 架構即時儀表板",
-            description="本系統採用與 **Rythm / Hydra** 相同規格之音訊架構，融合 Lavalink v4 與極限調校原生雙核心：",
+            title="🎧 音訊引擎狀態 (Audio Engine Status)",
+            description="DJ Donut 支援 Lavalink v4 與本機原生 FFmpeg 雙模音訊管線：",
             color=0x9B59B6
         )
 
         lavalink_connected = any(b.lavalink_connected for b in NODE_BOTS)
-        lavalink_status = "🟢 已連線啟用 (100% Opus 零世代損失直通 + JDA-NAS 微秒時鐘)" if lavalink_connected else "⚪ 未連線 (自動無縫由極限原生引擎接管)"
-        node_uri_display = LAVALINK_URI if LAVALINK_URI else "未填寫 (可於 .env 中配置自建或公共節點)"
+        lavalink_status = "🟢 已連線 (使用 Lavalink v4 節點)" if lavalink_connected else "⚪ 未連線 (使用本機原生 FFmpeg)"
+        node_uri_display = LAVALINK_URI if LAVALINK_URI else "未配置 (可於 .env 設定 LAVALINK_URI)"
 
         embed.add_field(
-            name="⚡ Lavalink v4 商業旗艦引擎",
-            value=f"• 狀態: `{lavalink_status}`\n• 節點位址: `{node_uri_display}`\n• 核心優勢: 原始 Opus 直通、32-bit 浮點 DSP 等化器、0 抖動排程",
+            name="⚡ Lavalink v4",
+            value=f"• 狀態: `{lavalink_status}`\n• 節點位址: `{node_uri_display}`\n• 支援: 外部音訊節點轉發、即時等化器濾鏡",
             inline=False
         )
         embed.add_field(
-            name="🔥 極限調校原生獨立引擎",
-            value="• 狀態: `🟢 常駐備援`\n• 核心優勢: 384kbps Opus 錄音室編碼、16MB 讀前防斷流緩衝區、1.0 音量數位無損直通、YouTube 403 自動鏡像備援",
+            name="🎵 原生 FFmpeg 引擎",
+            value="• 狀態: `🟢 就緒`\n• 支援: 最高 384kbps Opus 編碼、預載緩衝區、單執行緒 CPU 保護",
             inline=False
         )
-        embed.add_field(name="🤖 在線機器人矩陣", value=f"`{len(NODE_BOTS)} 隻節點待命服務中`", inline=True)
-        embed.set_footer(text="提示：使用 /bassboost 或 /filter 可隨時切換 15 頻段等化器與重低音！")
+        embed.add_field(name="🤖 機器人數量", value=f"`共 {len(NODE_BOTS)} 隻待命中`", inline=True)
+        embed.set_footer(text="提示：可使用 /bassboost 或 /filter 調整音效等化器")
         await interaction.response.send_message(embed=embed)
 
     @tree.command(name="autoplay", description="開啟或關閉智慧自動接歌電台模式 (Toggle Autoplay radio mode)")
