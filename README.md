@@ -1,4 +1,4 @@
-#  DJ Donut — Discord Multi-Room Music Bot Cluster (多房間音樂機器人矩陣)
+# DJ Donut — Discord Multi-Room Music Bot Cluster（多房間音樂機器人）
 
 <div align="center">
 
@@ -9,8 +9,8 @@
 ![i18n](https://img.shields.io/badge/i18n-6%20Languages-4CAF50)
 ![License](https://img.shields.io/badge/License-MIT-blue.svg)
 
-**An enterprise-grade, high-fidelity multi-room Discord music bot cluster.**  
-**Run and orchestrate 1 to 5 bots concurrently in a SINGLE lightweight process, powering independent music playback across 5 separate voice rooms!**
+**A Discord music bot cluster for managing multiple voice rooms.**  
+**Run 1 to 5 bots in a single process, with independent playback in up to five voice rooms.**
 
 [English Documentation](#-english-guide) • [繁體中文說明](#-繁體中文說明) • [Features](#-key-features) • [Quick Start](#-quick-start) • [Commands](#-slash-commands-reference)
 
@@ -18,65 +18,65 @@
 
 ---
 
-## 🌟 Key Features / 核心特色
+## Key Features / 核心功能
 
-- 🚀 **Multi-Room Audio Matrix (多房間分流調度)**:
-  - Run up to 5 Discord music bots concurrently inside a single Python process or Pterodactyl panel!
-  - Users only type `/play <query>` in chat; the smart dispatcher automatically detects user voice channels and dispatches an idle bot into that room!
-  - 5 different rooms can play completely different music, queues, volume, and audio effects independently!
+- **Multi-room playback（多房間播放）**:
+  - Run up to five Discord music bots in one Python process or Pterodactyl panel.
+  - Use `/play <query>` to play music. The dispatcher checks the user’s voice channel and assigns an available bot when needed.
+  - Each of the five rooms can have its own playback, queue, volume, and audio effects.
 
-- ⚡ **Dual-Engine Architecture (旗艦雙引擎自適應架構)**:
-  - **Engine A (Lavalink v4 + Wavelink)**: 100% Opus Passthrough (Bit-Perfect stream without lossy re-encoding), JDA-NAS microsecond clock scheduling (`<0.05ms` packet jitter), and 32-bit float real-time DSP equalizers.
-  - **Engine B (Native Studio FFmpeg Engine)**: Zero external server dependencies required! Built-in 384kbps Opus studio transcode pipeline, 16MB ring pre-buffer, thread-limited CPU guard (`-threads 1` to prevent 5-room CPU spikes), and YouTube 403 anti-blocking headers.
+- **Dual-engine architecture（雙引擎架構）**:
+  - **Engine A (Lavalink v4 + Wavelink)**: Supports Opus passthrough, JDA-NAS clock scheduling, and real-time 32-bit float DSP equalization.
+  - **Engine B (FFmpeg)**: Runs without a separate Lavalink server. Includes an Opus transcoding pipeline, a 16 MB ring buffer, a one-thread CPU limit (`-threads 1`), and headers intended to help with YouTube 403 errors.
 
-- 🌐 **Full Internationalization (i18n 多國語言支援)**:
+- **Localization（多國語言）**:
   - Supports **English (🇺🇸)**, **繁體中文 (🇹🇼)**, **简体中文 (🇨🇳)**, **日本語 (🇯🇵)**, **한국어 (🇰🇷)**, and **Español (🇪🇸)**.
-  - **Zero-config native auto-detection**: Detects each user's Discord client language automatically (`interaction.locale`).
-  - Server admins can set a default server language at any time via `/language`.
+  - Detects each user’s Discord client language through `interaction.locale`.
+  - Server administrators can set the default language with `/language`.
 
-- 📻 **Smart Autoplay Radio Mode (智慧自動接歌電台)**:
-  - Run `/autoplay` to enable continuous radio mode. When the current queue ends, the bot automatically finds stylistically matching tracks so the music never stops!
+- **Autoplay（自動接歌）**:
+  - Run `/autoplay` to enable radio mode. When the queue ends, the bot looks for tracks with a similar style.
 
-- 📜 **Real-time Synced & Plain Lyrics (動態時間軸即時歌詞)**:
-  - Run `/lyrics [song]` to fetch synchronized (karaoke-style) or plain lyrics in real-time from LRCLIB & Netease Cloud databases with 0 API keys required.
+- **Lyrics（歌詞）**:
+  - Run `/lyrics [song]` to look up synchronized or plain lyrics from LRCLIB and Netease Cloud. No API key is required for these lookups.
 
-- 🛡️ **24/7 Permanence Mode (24/7 常駐模式)**:
-  - Run `/247` to lock the bot inside your voice channel permanently, preventing automatic disconnection when listeners leave or pause.
+- **24/7 mode（常駐模式）**:
+  - Run `/247` to keep the bot in a voice channel when listeners leave or playback is paused.
 
-- 🟢 **Spotify & YouTube Zero-Config Playback (全平台音樂連結一鍵解析)**:
-  - Paste any Spotify track, playlist, or album link directly! Fast web metadata parser extracts all songs and streams them with zero rate-limit or API key requirement.
+- **Spotify and YouTube links（連結解析）**:
+  - Paste a Spotify track, playlist, or album link to retrieve its track information and play the results. Availability may depend on the source and its current restrictions.
 
-- 🎛️ **Hardware-Level DSP Equalizer & Bass Boost (專業等化器與重低音)**:
-  - Real-time Bass Boost (`/bassboost`) from +4dB to +20dB extreme shake.
-  - 9 Sound Filter Presets (`/filter`): Rock, Pop, Clear Vocal, Crisp Treble, Nightcore, Vaporwave, and 8D Spatial Surround Sound.
+- **Equalizer and bass boost（等化器與重低音）**:
+  - Adjust bass boost with `/bassboost`, from +4 dB to +20 dB.
+  - Use `/filter` to select sound presets, including Rock, Pop, Clear Vocal, Crisp Treble, Nightcore, Vaporwave, and 8D.
 
-- 💡 **Extremely Lightweight (超低資源消耗)**:
-  - Only uses ~70MB to 120MB of RAM for all 5 bots combined. Perfectly optimized for cheap VPS nodes and Pterodactyl game panels.
+- **Resource usage（資源使用量）**:
+  - The project targets roughly 70–120 MB of RAM for all five bots combined. Actual usage depends on the workload and environment.
 
 ---
 
-## 📜 Slash Commands Reference / 斜線指令一覽
+## Slash Commands Reference / 斜線指令一覽
 
 | Command (指令) | Parameters (參數) | Description (EN) | 說明 (繁體中文) |
 | :--- | :--- | :--- | :--- |
-| **/play** | `query`, `[bot_id]` | Smart play (Auto-dispatches idle bot or targeted bot 1~5) | 智能點歌（自動派遣空閒機器人進房，亦可指名 1~5 號） |
-| **/autoplay** | *None* | Toggle smart autoplay radio mode when queue ends | 切換智慧自動接歌電台模式 (歌單結束自動無縫接歌) |
+| **/play** | `query`, `[bot_id]` | Smart play (Auto-dispatches idle bot or targeted bot 1~5) | 點歌（自動分配可用機器人，也可指定 1～5 號） |
+| **/autoplay** | *None* | Toggle smart autoplay radio mode when queue ends | 切換自動接歌模式模式 (歌單結束自動無縫接歌) |
 | **/lyrics** | `[song]` | View synced or plain lyrics for current / queried song | 查詢當前或指定歌曲的動態/純文字即時歌詞 |
 | **/247** | *None* | Toggle 24/7 permanent stay-in-room mode | 切換 24/7 永久常駐語音房模式 |
 | **/language** | `language` | Set server default language (en / zh-TW / ja / ko / es) | 設定伺服器預設語言 |
-| **/status** | *None* | Live cluster dashboard for all 5 bot nodes | 查看所有機器人的即時連線、房號與分流總覽儀表板 |
-| **/nowplaying**| *None* | View track details, bitrate, engine & interactive controller | 查看當前歌曲詳情、位元率與按鈕控制器 |
+| **/status** | *None* | Live cluster dashboard for all 5 bot nodes | 查看各機器人的連線狀態、所在語音房與分流資訊 |
+| **/nowplaying**| *None* | View track details, bitrate, engine & interactive controller | 查看目前歌曲、位元率及互動控制器 |
 | **/queue** | *None* | View upcoming queued songs in your voice room | 查看你所在語音房的待播歌單隊列 |
 | **/skip** | *None* | Skip currently playing song in your room | 跳過你當前語音房的歌曲 |
 | **/stop** | `[force_all]` | Stop playback and leave voice room (or force-stop all bots) | 停止播放並退出語音房（或強制全部退出） |
-| **/bassboost** | `level` | Adjust real-time Bass Boost (Off / Low / Medium / High / Extreme) | 即時開啟或調整重低音增強強度 |
-| **/filter** | `preset` | Apply audio filters (Rock / Pop / Vocal / Nightcore / 8D / etc.) | 套用專業等化器音效濾鏡 (搖滾/夜核/8D等) |
-| **/bitrate** | `[kbps]` | Maximize voice channel bitrate up to 384kbps | 查看或一鍵將當前語音房提升至最高音質位元率 |
+| **/bassboost** | `level` | Adjust real-time Bass Boost (Off / Low / Medium / High / Extreme) | 調整重低音增強程度 |
+| **/filter** | `preset` | Apply audio filters (Rock / Pop / Vocal / Nightcore / 8D / etc.) | 套用音效濾鏡 (搖滾/夜核/8D等) |
+| **/bitrate** | `[kbps]` | Maximize voice channel bitrate up to 384kbps | 查看或調整目前語音房的位元率 |
 | **/engine** | *None* | View Dual-Engine (Lavalink v4 / Native) real-time diagnostics | 查看雙引擎架構即時運作狀態與音訊規格 |
 
 ---
 
-## 🚀 Quick Start / 快速開始
+## Quick Start / 快速開始
 
 ### Option 1: Run with Python Locally (本機或 VPS 部署)
 
@@ -144,12 +144,12 @@
 
 ---
 
-## 🎧 Audio Fidelity Optimization Guide (頂級音質設定指南)
+## Audio Settings / 音訊設定
 
-If audio sounds muffled, hollow, or has missing bass drums, please follow these two critical Discord settings:
+If playback sounds muffled or the bass is weak, check these Discord settings:
 
-### 1. Disable Discord "Krisp Noise Suppression" (重要：關閉降噪)
-Discord's Krisp algorithm is trained for human voices and treats musical drums, bass lines, and synth reverbs as "background noise", heavily filtering them out:
+### 1. Check Discord noise suppression
+Discord’s noise suppression is designed for voice chat and may filter parts of music, such as drums, bass, or reverb.
 - **Desktop (PC/Mac)**:
   1. Click **User Settings (Gear)** -> **Voice & Video**.
   2. Scroll to **Noise Suppression** -> Select **None** (Turn off Krisp).
@@ -157,12 +157,12 @@ Discord's Krisp algorithm is trained for human voices and treats musical drums, 
 - **Mobile (iOS/Android)**:
   Inside the voice room, swipe up and turn off **Noise Suppression**.
 
-### 2. Maximize Channel Bitrate (`/bitrate`)
-Discord voice channels default to 64 kbps. Run `/bitrate` or ask a server administrator to drag the voice channel bitrate slider to maximum (up to 384 kbps on boosted servers).
+### 2. Adjust the channel bitrate (`/bitrate`)
+Voice-channel bitrate depends on the server and channel settings. Run `/bitrate` if supported, or ask a server administrator to adjust the channel bitrate.
 
 ---
 
-## 🛠️ Tech Stack & Architecture
+## Tech Stack & Architecture
 
 ```mermaid
 flowchart TD
@@ -192,6 +192,6 @@ flowchart TD
 
 ---
 
-## 📄 License
+## License
 
-This project is licensed under the [MIT License](LICENSE). Feel free to fork, customize, and share!
+This project is licensed under the [MIT License](LICENSE). You may use, modify, and redistribute it under the terms of that license.
