@@ -218,7 +218,3 @@ flowchart TD
 - **GitHub Issues**: [提交 Issue / 功能建議](https://github.com/asian0626/DJ-Donut/issues)
 
 ---
-
-## License
-
-This project is licensed under the [MIT License](LICENSE). You may use, modify, and redistribute it under the terms of that license.
