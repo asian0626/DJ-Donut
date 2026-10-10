@@ -1,4 +1,4 @@
-# 🎛️ Discord Multi-Room Music Bot Cluster (Discord 5 機一體多房間音樂矩陣)
+# 🍩 DJ Donut — Discord Multi-Room Music Bot Cluster (多房間音樂機器人矩陣)
 
 <div align="center">
 
@@ -82,8 +82,8 @@
 
 1. **Clone repository & install dependencies**:
    ```bash
-   git clone https://github.com/your-username/discord-music-bot.git
-   cd discord-music-bot
+   git clone https://github.com/asian0626/DJ-Donut.git
+   cd DJ-Donut
    pip install -r requirements.txt
    ```
    *Make sure `ffmpeg` is installed on your system:*
