@@ -12,9 +12,27 @@
 **A Discord music bot cluster for managing multiple voice rooms.**  
 **Run 1 to 5 bots in a single process, with independent playback in up to five voice rooms.**
 
-[Features](#key-features--核心功能) • [Commands](#slash-commands-reference--斜線指令一覽) • [Quick Start](#quick-start--快速開始) • [Audio Settings](#audio-settings--音訊設定) • [License](#license)
+[Invite Bots](#official-bots--實作機器人邀請) • [Features](#key-features--核心功能) • [Commands](#slash-commands-reference--斜線指令一覽) • [Quick Start](#quick-start--快速開始) • [Audio Settings](#audio-settings--音訊設定) • [License](#license)
 
 </div>
+
+---
+
+## Official Bots / 實作機器人邀請
+
+可以直接將已架設的 **DJ Donut** 機器人矩陣邀請至你的 Discord 伺服器，立即體驗多房間獨立音樂播放：
+
+| 機器人節點 | 邀請連結 (OAuth2 URL) | 權限設定 |
+| :--- | :--- | :--- |
+| **DJ Donut 1 號 (主節點)** | [點此邀請 1 號機器人](https://discord.com/oauth2/authorize?client_id=1549028983641743462&permissions=8&integration_type=0&scope=bot) | 管理員權限 (`permissions=8`) |
+| **DJ Donut 2 號** | [點此邀請 2 號機器人](https://discord.com/oauth2/authorize?client_id=1549258600155979956&permissions=8&integration_type=0&scope=bot) | 管理員權限 (`permissions=8`) |
+| **DJ Donut 3 號** | [點此邀請 3 號機器人](https://discord.com/oauth2/authorize?client_id=1549259098761990184&permissions=0&integration_type=0&scope=bot) | 一般邀請 (`permissions=0`) *(可選 [管理員邀請](https://discord.com/oauth2/authorize?client_id=1549259098761990184&permissions=8&integration_type=0&scope=bot))* |
+| **DJ Donut 4 號** | [點此邀請 4 號機器人](https://discord.com/oauth2/authorize?client_id=1549259563646062743&permissions=8&integration_type=0&scope=bot) | 管理員權限 (`permissions=8`) |
+| **DJ Donut 5 號** | [點此邀請 5 號機器人](https://discord.com/oauth2/authorize?client_id=1549259919696592976&permissions=8&integration_type=0&scope=bot) | 管理員權限 (`permissions=8`) |
+
+> 💡 **多房間分流運作說明**：
+> - 只要將多隻機器人邀請至同一伺服器，使用者在不同語音房輸入 `/play` 時，系統會**自動指派空閒的機器人進房**，實現多個房間同時獨立播放音樂！
+> - 若伺服器內只有 1 隻機器人，當該機器人正在播放時，其他房間將無法使用，直到播放結束或邀請更多機器人進群。
 
 ---
 
