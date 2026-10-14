@@ -4,6 +4,7 @@ from discord.ext import commands
 import asyncio
 import os
 import time
+import subprocess
 from collections import deque
 from typing import Dict, Optional, List, Tuple
 import yt_dlp
@@ -102,7 +103,7 @@ def get_ytdl_opts(extract_flat: bool = False, noplaylist: bool = True) -> dict:
     return opts
 
 def get_ffmpeg_options(state: 'GuildMusicState') -> dict:
-    before = '-nostats -loglevel error -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -probesize 32k -analyzeduration 0'
+    before = '-nostats -loglevel fatal -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -reconnect_on_network_error 1 -reconnect_on_http_error 4xx,5xx -probesize 32k -analyzeduration 0'
     filters = []
     bb = BASSBOOST_PRESETS.get(state.bassboost, {}).get("ffmpeg")
     if bb:
@@ -1453,7 +1454,7 @@ async def play_next(bot: MusicNodeBot, guild: discord.Guild):
 
     try:
         ffmpeg_opts = get_ffmpeg_options(state)
-        source = discord.FFmpegPCMAudio(stream_url, **ffmpeg_opts)
+        source = discord.FFmpegPCMAudio(stream_url, stderr=subprocess.DEVNULL, **ffmpeg_opts)
 
         if state.volume != 1.0:
             audio_source = discord.PCMVolumeTransformer(source, volume=state.volume)
