@@ -2,7 +2,7 @@
 
 <div align="center">
 
-![Version](https://img.shields.io/badge/Version-v1.0.2-blue?logo=git)
+![Version](https://img.shields.io/badge/Version-v1.0.3-blue?logo=git)
 ![Python](https://img.shields.io/badge/Python-3.10%20%7C%203.11%20%7C%203.12-3776AB?logo=python&logoColor=white)
 ![Discord.py](https://img.shields.io/badge/Discord.py-v2.7.0%2B-5865F2?logo=discord&logoColor=white)
 ![Lavalink](https://img.shields.io/badge/Lavalink-v4.0%2B-FF3366?logo=audacity&logoColor=white)
@@ -62,8 +62,11 @@
 - **24/7 mode（常駐模式）**:
   - Run `/247` to keep the bot in a voice channel when listeners leave or playback is paused.
 
-- **Spotify and YouTube links（連結解析）**:
-  - Paste a Spotify track, playlist, or album link to retrieve its track information and play the results. Availability may depend on the source and its current restrictions.
+- **Multi-Platform Music Links（多平台音樂連結解析）**:
+  - **Spotify**: 支援單曲、歌單與專輯連結解析，自動匹配高品質音源。
+  - **網易雲音樂 (Netease Cloud Music)**: 支援單曲 (`song?id=`)、歌單 (`playlist?id=`)、專輯 (`album?id=`) 以及官方短網址 (`163cn.tv` / `163.lu`)，免 API Key 即時解析。
+  - **Apple Music**: 支援單曲、專輯與官方公開歌單 (`music.apple.com` / `apple.co`)，自動提取高畫質封面與音軌清單。
+  - **YouTube & SoundCloud**: 支援直接貼上影片、播放清單或關鍵字點歌。
 
 - **Equalizer and bass boost（等化器與重低音）**:
   - Adjust bass boost with `/bassboost`, from +4 dB to +20 dB.
@@ -213,6 +216,12 @@ flowchart TD
 
 ## Release Notes / 更新日誌
 
+### v1.0.3 (2026-10-14)
+- 🎵 **新增網易雲音樂支援**：全面支援網易雲單曲、歌單、專輯及官方短網址（`163cn.tv` / `163.lu`）直貼播放，免額外 API Key 即時解析。
+- 🍎 **新增 Apple Music 支援**：支援 Apple Music 單曲、專輯與公開精選歌單（`music.apple.com` / `apple.co`），自動擷取高畫質封面與音軌清單。
+- ⚡ **統一多平台解析管線**：重構 Spotify、網易雲與 Apple Music 的解析調度管線，支援最大 200 首曲目整單極速入列與串流派發。
+- ✉️ **更新支援與回饋窗口**：更新問題反饋與優化聯繫信箱至 `ian986260903@a1365.pro`。
+
 ### v1.0.2 (2026-10-14)
 - 🐛 **修復變數作用域異常**：解決 `/play` 指令中變數命名衝突引發的 `UnboundLocalError`，大幅提升點歌流程穩定度。
 - ⚡ **Spotify 快取效能升級**：改用 `MemoryCacheHandler` 記憶體快取處理器，徹底消除無權限環境下的 `.cache` 磁碟寫入警告。
@@ -226,7 +235,7 @@ flowchart TD
 
 若在使用過程中有任何問題、故障回報或效能優化方案，歡迎隨時聯絡：
 
-- **電子郵件 (Email)**: [ab21311@365mso.com](mailto:ab21311@365mso.com)
+- **電子郵件 (Email)**: [ian986260903@a1365.pro](mailto:ian986260903@a1365.pro)
 - **GitHub Issues**: [提交 Issue / 功能建議](https://github.com/asian0626/DJ-Donut/issues)
 
 ---

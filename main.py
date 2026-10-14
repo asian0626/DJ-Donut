@@ -19,7 +19,7 @@ from lyrics import get_lyrics
 
 load_dotenv()
 
-__version__ = "1.0.2"
+__version__ = "1.0.3"
 
 try:
     import wavelink
@@ -212,6 +212,16 @@ def extract_stream_url_sync(song_url: str, song_title: str) -> Tuple[Optional[st
 
 SPOTIFY_URL_REGEX = re.compile(
     r'(?:https?://(?:open\.)?spotify\.com/(?:intl-[a-zA-Z-]+/)?|spotify:)(track|playlist|album|artist)[:/]([a-zA-Z0-9]+)'
+)
+
+NETEASE_URL_REGEX = re.compile(
+    r'(?:https?://)?(?:[a-zA-Z0-9-]+\.)?(?:music\.163\.com|163cn\.tv|163\.lu)/.*?(\b(?:song|playlist|album)\b).*?(?:id=|\/)(\d+)',
+    re.IGNORECASE
+)
+
+APPLE_MUSIC_URL_REGEX = re.compile(
+    r'(?:https?://)?music\.apple\.com/(?:([a-z]{2})/)?(album|playlist|song)/([^/?#]+)(?:/(\d+|pl\.[a-zA-Z0-9]+))?(?:\?.*?\bi=(\d+))?',
+    re.IGNORECASE
 )
 
 _spotify_client = None
@@ -605,6 +615,357 @@ def resolve_spotify_sync(url: str) -> Optional[dict]:
 async def resolve_spotify(url: str) -> Optional[dict]:
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(None, lambda: resolve_spotify_sync(url))
+
+def resolve_netease_sync(url: str) -> Optional[dict]:
+    if "163cn.tv" in url or "163.lu" in url or "/s/" in url:
+        try:
+            req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'})
+            ctx = ssl._create_unverified_context()
+            with urllib.request.urlopen(req, context=ctx, timeout=5) as resp:
+                url = resp.geturl()
+        except Exception:
+            pass
+    m = NETEASE_URL_REGEX.search(url)
+    if not m:
+        return None
+    item_type = m.group(1).lower()
+    item_id = m.group(2)
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Referer': 'https://music.163.com/'
+    }
+    ctx = ssl._create_unverified_context()
+    if item_type == 'song':
+        try:
+            api_url = f"https://music.163.com/api/song/detail/?id={item_id}&ids=[{item_id}]"
+            req = urllib.request.Request(api_url, headers=headers)
+            with urllib.request.urlopen(req, context=ctx, timeout=8) as resp:
+                data = json.loads(resp.read().decode('utf-8'))
+            songs = data.get('songs', [])
+            if not songs:
+                return None
+            s = songs[0]
+            title = s.get('name', '未知歌曲')
+            artists = ", ".join(a.get('name', '') for a in s.get('artists', []) if a.get('name'))
+            duration = (s.get('duration', 0) or 0) // 1000
+            thumb = s.get('album', {}).get('picUrl', '')
+            song_url = f"https://music.163.com/#/song?id={item_id}"
+            return {
+                'platform': 'netease',
+                'platform_name': '網易雲音樂',
+                'color': 0xC20C0C,
+                'type': 'track',
+                'title': title,
+                'artist': artists,
+                'thumbnail': thumb,
+                'duration': duration,
+                'tracks': [{
+                    'title': title,
+                    'artist': artists,
+                    'duration': duration,
+                    'thumbnail': thumb,
+                    'url': song_url,
+                    'search_query': f"{title} {artists}".strip()
+                }]
+            }
+        except Exception as e:
+            print(f"[Netease] 單曲解析異常: {e}")
+            return None
+    elif item_type == 'playlist':
+        try:
+            api_url = f"https://music.163.com/api/v1/playlist/detail?id={item_id}"
+            req = urllib.request.Request(api_url, headers=headers)
+            with urllib.request.urlopen(req, context=ctx, timeout=10) as resp:
+                data = json.loads(resp.read().decode('utf-8'))
+            pl = data.get('playlist', {})
+            pl_name = pl.get('name', '網易雲歌單')
+            pl_thumb = pl.get('coverImgUrl', '')
+            raw_tracks = pl.get('tracks', [])
+            tracks = []
+            for t_item in raw_tracks[:200]:
+                title = t_item.get('name', '未知歌曲')
+                artist_list = t_item.get('ar') or t_item.get('artists') or []
+                artists = ", ".join(a.get('name', '') for a in artist_list if a.get('name'))
+                duration = (t_item.get('dt', 0) or t_item.get('duration', 0) or 0) // 1000
+                thumb = t_item.get('al', {}).get('picUrl') or pl_thumb
+                tid = t_item.get('id')
+                song_url = f"https://music.163.com/#/song?id={tid}" if tid else url
+                tracks.append({
+                    'title': title,
+                    'artist': artists,
+                    'duration': duration,
+                    'thumbnail': thumb,
+                    'url': song_url,
+                    'search_query': f"{title} {artists}".strip()
+                })
+            return {
+                'platform': 'netease',
+                'platform_name': '網易雲音樂',
+                'color': 0xC20C0C,
+                'type': 'playlist',
+                'title': pl_name,
+                'artist': pl.get('creator', {}).get('nickname', ''),
+                'thumbnail': pl_thumb,
+                'duration': sum(t['duration'] for t in tracks),
+                'tracks': tracks
+            }
+        except Exception as e:
+            print(f"[Netease] 歌單解析異常: {e}")
+            return None
+    elif item_type == 'album':
+        try:
+            api_url = f"https://music.163.com/api/v1/album/{item_id}"
+            req = urllib.request.Request(api_url, headers=headers)
+            with urllib.request.urlopen(req, context=ctx, timeout=10) as resp:
+                data = json.loads(resp.read().decode('utf-8'))
+            album = data.get('album', {})
+            album_name = album.get('name', '網易雲專輯')
+            album_thumb = album.get('picUrl', '')
+            raw_songs = data.get('songs', [])
+            tracks = []
+            for t_item in raw_songs[:200]:
+                title = t_item.get('name', '未知歌曲')
+                artist_list = t_item.get('ar') or t_item.get('artists') or []
+                artists = ", ".join(a.get('name', '') for a in artist_list if a.get('name'))
+                duration = (t_item.get('dt', 0) or t_item.get('duration', 0) or 0) // 1000
+                thumb = album_thumb
+                tid = t_item.get('id')
+                song_url = f"https://music.163.com/#/song?id={tid}" if tid else url
+                tracks.append({
+                    'title': title,
+                    'artist': artists,
+                    'duration': duration,
+                    'thumbnail': thumb,
+                    'url': song_url,
+                    'search_query': f"{title} {artists}".strip()
+                })
+            return {
+                'platform': 'netease',
+                'platform_name': '網易雲音樂',
+                'color': 0xC20C0C,
+                'type': 'album',
+                'title': album_name,
+                'artist': album.get('artist', {}).get('name', ''),
+                'thumbnail': album_thumb,
+                'duration': sum(t['duration'] for t in tracks),
+                'tracks': tracks
+            }
+        except Exception as e:
+            print(f"[Netease] 專輯解析異常: {e}")
+            return None
+    return None
+
+async def resolve_netease(url: str) -> Optional[dict]:
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, lambda: resolve_netease_sync(url))
+
+def format_apple_artwork(art_obj) -> str:
+    if not art_obj:
+        return ''
+    raw_url = art_obj.get('dictionary', {}).get('url') if isinstance(art_obj, dict) else ''
+    if not raw_url and isinstance(art_obj, dict):
+        raw_url = art_obj.get('url', '')
+    if raw_url:
+        return raw_url.replace('{w}', '600').replace('{h}', '600').replace('{f}', 'jpg')
+    return ''
+
+def resolve_apple_music_sync(url: str) -> Optional[dict]:
+    if "apple.co" in url:
+        try:
+            req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)'})
+            ctx = ssl._create_unverified_context()
+            with urllib.request.urlopen(req, context=ctx, timeout=5) as resp:
+                url = resp.geturl()
+        except Exception:
+            pass
+    m = APPLE_MUSIC_URL_REGEX.search(url)
+    if not m:
+        return None
+    country = m.group(1) or 'us'
+    item_type = m.group(2).lower()
+    slug_or_id = m.group(3)
+    id_part = m.group(4)
+    track_id_param = m.group(5)
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    }
+    ctx = ssl._create_unverified_context()
+    if track_id_param:
+        try:
+            api_url = f"https://itunes.apple.com/lookup?id={track_id_param}&country={country}"
+            req = urllib.request.Request(api_url, headers=headers)
+            with urllib.request.urlopen(req, context=ctx, timeout=8) as resp:
+                data = json.loads(resp.read().decode('utf-8'))
+            results = data.get('results', [])
+            if results:
+                r = results[0]
+                title = r.get('trackName', '未知歌曲')
+                artist = r.get('artistName', '')
+                duration = (r.get('trackTimeMillis', 0) or 0) // 1000
+                thumb = r.get('artworkUrl100', '').replace('100x100bb', '600x600bb')
+                return {
+                    'platform': 'apple_music',
+                    'platform_name': 'Apple Music',
+                    'color': 0xFC3C44,
+                    'type': 'track',
+                    'title': title,
+                    'artist': artist,
+                    'thumbnail': thumb,
+                    'duration': duration,
+                    'tracks': [{
+                        'title': title,
+                        'artist': artist,
+                        'duration': duration,
+                        'thumbnail': thumb,
+                        'url': r.get('trackViewUrl', url),
+                        'search_query': f"{title} {artist}".strip()
+                    }]
+                }
+        except Exception as e:
+            print(f"[Apple Music] 單曲參數解析異常: {e}")
+
+    if item_type == 'song':
+        song_id = id_part if (id_part and id_part.isdigit()) else (slug_or_id if slug_or_id.isdigit() else None)
+        if song_id:
+            try:
+                api_url = f"https://itunes.apple.com/lookup?id={song_id}&country={country}"
+                req = urllib.request.Request(api_url, headers=headers)
+                with urllib.request.urlopen(req, context=ctx, timeout=8) as resp:
+                    data = json.loads(resp.read().decode('utf-8'))
+                results = data.get('results', [])
+                if results:
+                    r = results[0]
+                    title = r.get('trackName', '未知歌曲')
+                    artist = r.get('artistName', '')
+                    duration = (r.get('trackTimeMillis', 0) or 0) // 1000
+                    thumb = r.get('artworkUrl100', '').replace('100x100bb', '600x600bb')
+                    return {
+                        'platform': 'apple_music',
+                        'platform_name': 'Apple Music',
+                        'color': 0xFC3C44,
+                        'type': 'track',
+                        'title': title,
+                        'artist': artist,
+                        'thumbnail': thumb,
+                        'duration': duration,
+                        'tracks': [{
+                            'title': title,
+                            'artist': artist,
+                            'duration': duration,
+                            'thumbnail': thumb,
+                            'url': r.get('trackViewUrl', url),
+                            'search_query': f"{title} {artist}".strip()
+                        }]
+                    }
+            except Exception as e:
+                print(f"[Apple Music] 單曲解析異常: {e}")
+
+    if item_type == 'album':
+        album_id = id_part if (id_part and id_part.isdigit()) else (slug_or_id if slug_or_id.isdigit() else None)
+        if album_id:
+            try:
+                api_url = f"https://itunes.apple.com/lookup?id={album_id}&entity=song&country={country}"
+                req = urllib.request.Request(api_url, headers=headers)
+                with urllib.request.urlopen(req, context=ctx, timeout=10) as resp:
+                    data = json.loads(resp.read().decode('utf-8'))
+                results = data.get('results', [])
+                if results:
+                    col = results[0]
+                    col_name = col.get('collectionName', 'Apple Music 專輯')
+                    col_artist = col.get('artistName', '')
+                    col_thumb = col.get('artworkUrl100', '').replace('100x100bb', '600x600bb')
+                    song_results = [r for r in results if r.get('wrapperType') == 'track']
+                    tracks = []
+                    for s in song_results[:200]:
+                        t_title = s.get('trackName', '未知歌曲')
+                        t_artist = s.get('artistName', col_artist)
+                        t_dur = (s.get('trackTimeMillis', 0) or 0) // 1000
+                        t_thumb = s.get('artworkUrl100', '').replace('100x100bb', '600x600bb') or col_thumb
+                        tracks.append({
+                            'title': t_title,
+                            'artist': t_artist,
+                            'duration': t_dur,
+                            'thumbnail': t_thumb,
+                            'url': s.get('trackViewUrl', url),
+                            'search_query': f"{t_title} {t_artist}".strip()
+                        })
+                    return {
+                        'platform': 'apple_music',
+                        'platform_name': 'Apple Music',
+                        'color': 0xFC3C44,
+                        'type': 'album',
+                        'title': col_name,
+                        'artist': col_artist,
+                        'thumbnail': col_thumb,
+                        'duration': sum(t['duration'] for t in tracks),
+                        'tracks': tracks
+                    }
+            except Exception as e:
+                print(f"[Apple Music] 專輯解析異常: {e}")
+
+    if item_type == 'playlist':
+        try:
+            req = urllib.request.Request(url, headers=headers)
+            with urllib.request.urlopen(req, context=ctx, timeout=10) as resp:
+                html = resp.read().decode('utf-8')
+            m_json = re.search(r'<script type=\"application/json\" id=\"serialized-server-data\">(.*?)</script>', html, re.DOTALL)
+            if m_json:
+                parsed = json.loads(m_json.group(1))
+                pdata = parsed if isinstance(parsed, dict) else (parsed[0] if parsed else {})
+                data_list = pdata.get('data', [])
+                if data_list:
+                    inner_data = data_list[0].get('data', {})
+                    sections = inner_data.get('sections', [])
+                    pl_name = 'Apple Music 歌單'
+                    pl_thumb = ''
+                    if sections and sections[0].get('items'):
+                        h_item = sections[0]['items'][0]
+                        pl_name = h_item.get('title') or pl_name
+                        pl_thumb = format_apple_artwork(h_item.get('artwork'))
+                    if not pl_name or pl_name == 'Apple Music 歌單':
+                        seo_title = inner_data.get('seoData', {}).get('pageTitle', '')
+                        if seo_title:
+                            pl_name = seo_title.split(' - ')[0]
+
+                    best_section = max(sections, key=lambda s: len(s.get('items', []))) if sections else {}
+                    items = best_section.get('items', [])
+                    tracks = []
+                    for it in items[:200]:
+                        t_title = it.get('title')
+                        if not t_title:
+                            continue
+                        t_artist = it.get('artistName', '')
+                        t_dur = (it.get('duration', 0) or 0) // 1000
+                        t_thumb = format_apple_artwork(it.get('artwork')) or pl_thumb
+                        t_url = it.get('contentDescriptor', {}).get('url') or url
+                        tracks.append({
+                            'title': t_title,
+                            'artist': t_artist,
+                            'duration': t_dur,
+                            'thumbnail': t_thumb,
+                            'url': t_url,
+                            'search_query': f"{t_title} {t_artist}".strip()
+                        })
+                    if tracks:
+                        return {
+                            'platform': 'apple_music',
+                            'platform_name': 'Apple Music',
+                            'color': 0xFC3C44,
+                            'type': 'playlist',
+                            'title': pl_name,
+                            'artist': 'Apple Music',
+                            'thumbnail': pl_thumb,
+                            'duration': sum(t['duration'] for t in tracks),
+                            'tracks': tracks
+                        }
+        except Exception as e:
+            print(f"[Apple Music] 歌單解析異常: {e}")
+
+    return None
+
+async def resolve_apple_music(url: str) -> Optional[dict]:
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, lambda: resolve_apple_music_sync(url))
 
 def is_vc_connected(vc) -> bool:
     if not vc:
@@ -1009,7 +1370,7 @@ async def play_next(bot: MusicNodeBot, guild: discord.Guild):
             try:
                 search_query = next_song.title
                 tracks = await wavelink.Playable.search(search_query)
-                if not tracks and next_song.url and not SPOTIFY_URL_REGEX.search(next_song.url):
+                if not tracks and next_song.url and not (SPOTIFY_URL_REGEX.search(next_song.url) or NETEASE_URL_REGEX.search(next_song.url) or APPLE_MUSIC_URL_REGEX.search(next_song.url)):
                     tracks = await wavelink.Playable.search(next_song.url)
                 if not tracks:
                     tracks = await wavelink.Playable.search(f"ytsearch:{search_query}")
@@ -1367,7 +1728,14 @@ def register_slash_commands(primary_bot: commands.Bot):
                 await safe_stop(vc)
             await vc.move_to(bot_voice_channel)
 
-        if selected_bot.lavalink_connected and HAS_WAVELINK and not SPOTIFY_URL_REGEX.search(查詢) and not ("playlist" in 查詢.lower() or "list=" in 查詢.lower()):
+        is_custom_music_service = bool(
+            SPOTIFY_URL_REGEX.search(查詢) or
+            NETEASE_URL_REGEX.search(查詢) or
+            APPLE_MUSIC_URL_REGEX.search(查詢) or
+            ("163cn.tv" in 查詢 or "163.lu" in 查詢 or "apple.co" in 查詢) or
+            ("playlist" in 查詢.lower() or "list=" in 查詢.lower())
+        )
+        if selected_bot.lavalink_connected and HAS_WAVELINK and not is_custom_music_service:
             try:
                 tracks: wavelink.Search = await wavelink.Playable.search(查詢)
                 if tracks:
@@ -1407,16 +1775,35 @@ def register_slash_commands(primary_bot: commands.Bot):
 
         loop = asyncio.get_event_loop()
 
-        if SPOTIFY_URL_REGEX.search(查詢):
-            spotify_res = await resolve_spotify(查詢)
-            if not spotify_res or not spotify_res.get('tracks'):
-                await interaction.followup.send("❌ 無法解析該 Spotify 連結，請確認該歌曲或播放清單為公開狀態！")
+        is_spotify = bool(SPOTIFY_URL_REGEX.search(查詢))
+        is_netease = bool(NETEASE_URL_REGEX.search(查詢) or "163cn.tv" in 查詢 or "163.lu" in 查詢 or "music.163.com" in 查詢)
+        is_apple = bool(APPLE_MUSIC_URL_REGEX.search(查詢) or "apple.co" in 查詢 or "music.apple.com" in 查詢)
+
+        if is_spotify or is_netease or is_apple:
+            ext_res = None
+            if is_spotify:
+                ext_res = await resolve_spotify(查詢)
+                if ext_res:
+                    ext_res.setdefault('platform', 'spotify')
+                    ext_res.setdefault('platform_name', 'Spotify')
+                    ext_res.setdefault('color', 0x1DB954)
+            elif is_netease:
+                ext_res = await resolve_netease(查詢)
+            elif is_apple:
+                ext_res = await resolve_apple_music(查詢)
+
+            if not ext_res or not ext_res.get('tracks'):
+                platform_label = "Spotify" if is_spotify else ("網易雲音樂" if is_netease else "Apple Music")
+                await interaction.followup.send(f"❌ 無法解析該 {platform_label} 連結，請確認該歌曲或播放清單為公開狀態！")
                 return
 
-            if spotify_res['type'] in ('playlist', 'album') or len(spotify_res['tracks']) > 1:
-                tracks = spotify_res['tracks']
-                playlist_title = spotify_res.get('title', 'Spotify 播放清單')
-                playlist_thumb = spotify_res.get('thumbnail', '')
+            platform_name = ext_res.get('platform_name', '音樂平台')
+            embed_color = ext_res.get('color', 0x1DB954)
+
+            if ext_res['type'] in ('playlist', 'album') or len(ext_res['tracks']) > 1:
+                tracks = ext_res['tracks']
+                playlist_title = ext_res.get('title', f"{platform_name} 播放清單")
+                playlist_thumb = ext_res.get('thumbnail', '')
                 added_count = 0
 
                 for track_item in tracks[:200]:
@@ -1430,16 +1817,16 @@ def register_slash_commands(primary_bot: commands.Bot):
                         'url': search_q,
                         'duration': track_item.get('duration', 0),
                         'thumbnail': track_item.get('thumbnail') or playlist_thumb,
-                        'uploader': t_artist or 'Spotify'
+                        'uploader': t_artist or platform_name
                     }, interaction.user)
                     state.queue.append(song)
                     added_count += 1
 
-                type_label = "播放清單" if spotify_res['type'] == 'playlist' else "專輯"
+                type_label = "播放清單" if ext_res['type'] == 'playlist' else "專輯"
                 embed = discord.Embed(
-                    title=f"🟢 【{selected_bot.node_name}】成功匯入 Spotify {type_label}！",
+                    title=f"🎶 【{selected_bot.node_name}】成功匯入 {platform_name} {type_label}！",
                     description=f"**[{playlist_title}]({查詢})**",
-                    color=0x1DB954
+                    color=embed_color
                 )
                 if playlist_thumb:
                     embed.set_thumbnail(url=playlist_thumb)
@@ -1453,7 +1840,7 @@ def register_slash_commands(primary_bot: commands.Bot):
                     await play_next(selected_bot, bot_guild)
                 return
 
-            track_item = spotify_res['tracks'][0]
+            track_item = ext_res['tracks'][0]
             t_title = track_item.get('title', '未知歌曲')
             t_artist = track_item.get('artist', '')
             title_str = f"{t_title} - {t_artist}" if t_artist else t_title
@@ -1471,7 +1858,6 @@ def register_slash_commands(primary_bot: commands.Bot):
                             break
                 elif data and (data.get('url') or data.get('formats')):
                     yt_data = data
-
             except Exception:
                 yt_data = None
 
@@ -1492,7 +1878,7 @@ def register_slash_commands(primary_bot: commands.Bot):
                     yt_data = None
 
             if not yt_data:
-                await interaction.followup.send(f"❌ 找不到該 Spotify 歌曲 **{title_str}** 的音源！")
+                await interaction.followup.send(f"❌ 找不到該 {platform_name} 歌曲 **{title_str}** 的音源！")
                 return
 
             yt_data['title'] = title_str
@@ -1501,7 +1887,7 @@ def register_slash_commands(primary_bot: commands.Bot):
                 yt_data['thumbnail'] = track_item['thumbnail']
             if track_item.get('duration'):
                 yt_data['duration'] = track_item['duration']
-            yt_data['uploader'] = t_artist or 'Spotify'
+            yt_data['uploader'] = t_artist or platform_name
 
             song = Song(yt_data, interaction.user)
 
@@ -1510,7 +1896,7 @@ def register_slash_commands(primary_bot: commands.Bot):
                 embed = discord.Embed(
                     title=t('song_queued', interaction, bot_name=selected_bot.node_name),
                     description=f"**[{song.title}]({song.url})**",
-                    color=0x1DB954
+                    color=embed_color
                 )
                 if song.thumbnail:
                     embed.set_thumbnail(url=song.thumbnail)
