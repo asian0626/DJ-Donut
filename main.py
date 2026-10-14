@@ -77,7 +77,7 @@ class YTDLNullLogger:
 
 def get_ytdl_opts(extract_flat: bool = False, noplaylist: bool = True) -> dict:
     opts = {
-        'format': 'bestaudio[ext=webm][acodec=opus][abr>=160]/bestaudio[format_id=251]/bestaudio/best',
+        'format': 'bestaudio[format_id=251]/bestaudio[ext=webm][acodec=opus][abr>=160]/bestaudio[ext=m4a][abr>=128]/bestaudio/best',
         'extractaudio': True,
         'audioquality': '0',
         'restrictfilenames': True,
@@ -92,12 +92,12 @@ def get_ytdl_opts(extract_flat: bool = False, noplaylist: bool = True) -> dict:
         'socket_timeout': 15,
         'extractor_args': {
             'youtube': {
-                'player_client': ['tv', 'web', 'ios'],
+                'player_client': ['ios', 'web', 'mweb'],
                 'skip': ['hls']
             }
         },
         'http_headers': {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36'
+            'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1'
         }
     }
     if extract_flat:
@@ -180,9 +180,8 @@ def get_ffmpeg_options(state: 'GuildMusicState', seek_seconds: Optional[int] = N
     before_parts = [
         '-nostats -loglevel fatal',
         '-headers "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36\r\nAccept: */*\r\n"',
-        '-http_persistent 0',
-        '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 2 -reconnect_on_network_error 1 -reconnect_on_http_error 4xx,5xx',
-        '-probesize 256k -analyzeduration 1000000'
+        '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -reconnect_on_network_error 1 -reconnect_on_http_error 4xx,5xx',
+        '-probesize 64k -analyzeduration 500000'
     ]
     if seek_seconds and seek_seconds > 0:
         before_parts.insert(1, f"-ss {seek_seconds}")
@@ -202,14 +201,13 @@ def get_ffmpeg_options(state: 'GuildMusicState', seek_seconds: Optional[int] = N
     return {'before_options': before, 'options': opt}
 
 class BufferedAudioSource(discord.AudioSource):
-    def __init__(self, source: discord.AudioSource, prefetch_frames: int = 50, max_frames: int = 250):
+    def __init__(self, source: discord.AudioSource, prefetch_frames: int = 50, max_frames: int = 500):
         self.source = source
         self.buffer = queue.Queue(maxsize=max_frames)
         self.prefetch_frames = prefetch_frames
         self._stop_event = threading.Event()
         self._finished = False
         self._started = False
-        self._empty_count = 0
         self._thread = threading.Thread(target=self._worker, daemon=True)
         self._thread.start()
 
@@ -228,7 +226,7 @@ class BufferedAudioSource(discord.AudioSource):
                     break
                 while not self._stop_event.is_set():
                     try:
-                        self.buffer.put(data, timeout=0.1)
+                        self.buffer.put(data, timeout=0.2)
                         break
                     except queue.Full:
                         continue
@@ -245,19 +243,14 @@ class BufferedAudioSource(discord.AudioSource):
         if not self._started:
             self._started = True
             start_wait = time.time()
-            while time.time() - start_wait < 1.5:
+            while time.time() - start_wait < 2.0:
                 if self._stop_event.is_set() or self._finished or self.buffer.qsize() >= self.prefetch_frames:
                     break
-                time.sleep(0.01)
+                time.sleep(0.02)
         try:
-            data = self.buffer.get(timeout=0.02)
-            self._empty_count = 0
-            return data
+            return self.buffer.get(timeout=0.5)
         except queue.Empty:
             if self._finished and self.buffer.empty():
-                return b''
-            self._empty_count += 1
-            if self._empty_count > 250:
                 return b''
             return bytes(3840)
 
@@ -343,12 +336,24 @@ def _extract_media_info(data: Optional[dict]) -> Tuple[Optional[str], Optional[s
     for target in entries:
         if not target or not isinstance(target, dict):
             continue
-        url = target.get('url')
-        if not url and 'formats' in target and target['formats']:
-            audio_formats = [f for f in target['formats'] if isinstance(f, dict) and f.get('acodec') != 'none' and f.get('url')]
+        url = None
+        if 'formats' in target and target['formats']:
+            audio_formats = [
+                f for f in target['formats']
+                if isinstance(f, dict) and f.get('acodec') != 'none' and f.get('url')
+            ]
             if audio_formats:
-                best_f = max(audio_formats, key=lambda f: (1 if f.get('acodec') == 'opus' else 0, f.get('abr') or 0))
+                best_f = max(
+                    audio_formats,
+                    key=lambda f: (
+                        2 if str(f.get('format_id')) == '251' else (1 if f.get('acodec') == 'opus' else 0),
+                        f.get('abr') or 0,
+                        f.get('tbr') or 0
+                    )
+                )
                 url = best_f.get('url')
+        if not url:
+            url = target.get('url')
         if url:
             thumb = target.get('thumbnail', '')
             dur = target.get('duration', 0)
@@ -1855,9 +1860,21 @@ async def play_next(bot: MusicNodeBot, guild: discord.Guild):
             state.is_playing = False
             return
 
-        bitrate_kbps = 128
         if hasattr(vc, 'channel') and vc.channel and hasattr(vc.channel, 'bitrate') and vc.channel.bitrate:
-            bitrate_kbps = min(384, max(64, vc.channel.bitrate // 1000))
+            target_bps = min(384000, max(64000, vc.channel.bitrate))
+            for enc_attr in ('encoder', '_encoder'):
+                enc = getattr(vc, enc_attr, None)
+                if enc:
+                    if hasattr(enc, 'set_bitrate') and callable(enc.set_bitrate):
+                        try:
+                            enc.set_bitrate(target_bps // 1000)
+                        except Exception:
+                            pass
+                    elif hasattr(enc, 'bitrate'):
+                        try:
+                            enc.bitrate = target_bps
+                        except Exception:
+                            pass
 
         if hasattr(vc, 'play'):
             if asyncio.iscoroutinefunction(vc.play):
@@ -2637,7 +2654,7 @@ def register_slash_commands(primary_bot: commands.Bot):
         try:
             ffmpeg_opts = get_ffmpeg_options(state, seek_seconds=target_sec)
             source = discord.FFmpegPCMAudio(stream_url, stderr=subprocess.DEVNULL, **ffmpeg_opts)
-            buffered_source = BufferedAudioSource(source, prefetch_frames=50, max_frames=250)
+            buffered_source = BufferedAudioSource(source, prefetch_frames=50, max_frames=500)
             audio_source = discord.PCMVolumeTransformer(buffered_source, volume=state.volume)
 
             def after_callback(error):
@@ -2650,6 +2667,22 @@ def register_slash_commands(primary_bot: commands.Bot):
                     fut.result()
                 except Exception as e:
                     print(f"[{b.node_name} Player Next Error] {e}")
+
+            if hasattr(vc, 'channel') and vc.channel and hasattr(vc.channel, 'bitrate') and vc.channel.bitrate:
+                target_bps = min(384000, max(64000, vc.channel.bitrate))
+                for enc_attr in ('encoder', '_encoder'):
+                    enc = getattr(vc, enc_attr, None)
+                    if enc:
+                        if hasattr(enc, 'set_bitrate') and callable(enc.set_bitrate):
+                            try:
+                                enc.set_bitrate(target_bps // 1000)
+                            except Exception:
+                                pass
+                        elif hasattr(enc, 'bitrate'):
+                            try:
+                                enc.bitrate = target_bps
+                            except Exception:
+                                pass
 
             vc.play(audio_source, after=after_callback)
             state.start_time = time.time() - target_sec
