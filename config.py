@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-__version__ = "1.3.0"
+__version__ = "1.3.1"
 
 logging.basicConfig(
     level=logging.INFO,
@@ -202,10 +202,10 @@ def get_ffmpeg_options(state: Any, seek_seconds: Optional[int] = None) -> dict:
         before_parts.insert(1, f"-ss {seek_seconds}")
     before = " ".join(before_parts)
     filters = []
-    bb = BASSBOOST_PRESETS.get(getattr(state, 'bassboost', 'off'), {}).get("ffmpeg")
+    bb = (BASSBOOST_PRESETS.get(getattr(state, 'bassboost', 'off')) or {}).get("ffmpeg")
     if bb:
         filters.append(bb)
-    eq = EQ_PRESETS.get(getattr(state, 'filter', 'reset'), {}).get("ffmpeg")
+    eq = (EQ_PRESETS.get(getattr(state, 'filter', 'reset')) or {}).get("ffmpeg")
     if eq:
         filters.append(eq)
 

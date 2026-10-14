@@ -2,7 +2,7 @@
 
 <div align="center">
 
-![Version](https://img.shields.io/badge/Version-v1.3.0-blue?logo=git)
+![Version](https://img.shields.io/badge/Version-v1.3.1-blue?logo=git)
 ![Python](https://img.shields.io/badge/Python-3.10%20%7C%203.11%20%7C%203.12-3776AB?logo=python&logoColor=white)
 ![Discord.py](https://img.shields.io/badge/Discord.py-v2.7.0%2B-5865F2?logo=discord&logoColor=white)
 ![Lavalink](https://img.shields.io/badge/Lavalink-v4.0%2B-FF3366?logo=audacity&logoColor=white)
@@ -228,6 +228,11 @@ discord-music-bot/
 ---
 
 ## Changelog
+
+### v1.3.1 (2026-10-15)
+- **Resolved `/play` NoneType Error**: Fixed `AttributeError: 'NoneType' object has no attribute 'get'` triggered when search queries returned restricted, deleted, or empty entries under yt-dlp `ignoreerrors=True`.
+- **Defensive Track Metadata Validation**: Hardened `Song` data constructor to gracefully handle `None` and non-dict inputs, ensuring fallback values are always populated safely.
+- **Robust Preset Lookups**: Protected DSP equalizer presets and bass boost configurations with default dictionaries against missing or malformed keys.
 
 ### v1.3.0 (2026-10-15)
 - **Modular Architecture Decomposition**: Broke down the 3,500+ line monolithic `main.py` into decoupled, maintainable packages (`core/`, `platforms/`, `ui/`, `commands/`, `config.py`).

@@ -81,10 +81,11 @@ class BufferedAudioSource(discord.AudioSource):
             self.source.cleanup()
 
 class Song:
-    def __init__(self, data: dict, requester: discord.Member, wavelink_track=None):
+    def __init__(self, data: Optional[dict], requester: discord.Member, wavelink_track=None):
+        data = data if isinstance(data, dict) else {}
         self.data = data
-        self.title = data.get('title', '未知標題')
-        raw_url = data.get('webpage_url') or data.get('url', '')
+        self.title = data.get('title', '未知標題') or '未知標題'
+        raw_url = data.get('webpage_url') or data.get('url', '') or ''
         vid = data.get('id')
         if raw_url and raw_url.startswith('http'):
             self.url = raw_url
@@ -94,10 +95,11 @@ class Song:
             self.url = f"https://www.youtube.com/watch?v={raw_url}"
         else:
             self.url = ''
-        self.stream_url = data.get('url', '') if (data.get('url', '').startswith('http') and 'googlevideo.com' in data.get('url', '')) else ''
-        self.duration = data.get('duration', 0)
-        self.thumbnail = data.get('thumbnail', '')
-        self.uploader = data.get('uploader', '未知上傳者')
+        stream_u = data.get('url', '') or ''
+        self.stream_url = stream_u if (stream_u.startswith('http') and 'googlevideo.com' in stream_u) else ''
+        self.duration = data.get('duration', 0) or 0
+        self.thumbnail = data.get('thumbnail', '') or ''
+        self.uploader = data.get('uploader', '未知上傳者') or '未知上傳者'
         self.requester = requester
         self.wavelink_track = wavelink_track
 

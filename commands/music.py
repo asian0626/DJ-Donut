@@ -209,29 +209,31 @@ def register_music_commands(tree: app_commands.CommandTree):
             platform_name = ext_res.get('platform_name', '音樂平台')
             embed_color = ext_res.get('color', 0x1DB954)
 
-            if ext_res['type'] in ('playlist', 'album') or len(ext_res['tracks']) > 1:
-                tracks = ext_res['tracks']
-                playlist_title = ext_res.get('title', f"{platform_name} 播放清單")
-                playlist_thumb = ext_res.get('thumbnail', '')
+            if ext_res.get('type') in ('playlist', 'album') or len(ext_res.get('tracks', [])) > 1:
+                tracks = ext_res.get('tracks', [])
+                playlist_title = ext_res.get('title', f"{platform_name} 播放清單") or f"{platform_name} 播放清單"
+                playlist_thumb = ext_res.get('thumbnail', '') or ''
                 added_count = 0
 
                 for track_item in tracks[:200]:
-                    t_title = track_item.get('title', '未知歌曲')
-                    t_artist = track_item.get('artist', '')
+                    if not track_item or not isinstance(track_item, dict):
+                        continue
+                    t_title = track_item.get('title', '未知歌曲') or '未知歌曲'
+                    t_artist = track_item.get('artist', '') or ''
                     title_str = f"{t_title} - {t_artist}" if t_artist else t_title
                     search_q = f"ytsearch5:{t_title} {t_artist}".strip()
                     song = Song({
                         'title': title_str,
                         'webpage_url': track_item.get('url') or 查詢,
                         'url': search_q,
-                        'duration': track_item.get('duration', 0),
+                        'duration': track_item.get('duration', 0) or 0,
                         'thumbnail': track_item.get('thumbnail') or playlist_thumb,
                         'uploader': t_artist or platform_name
                     }, interaction.user)
                     state.queue.append(song)
                     added_count += 1
 
-                type_label = "播放清單" if ext_res['type'] == 'playlist' else "專輯"
+                type_label = "播放清單" if ext_res.get('type') == 'playlist' else "專輯"
                 embed = discord.Embed(
                     title=f"🎶 【{selected_bot.node_name}】成功匯入 {platform_name} {type_label}！",
                     description=f"**[{playlist_title}]({查詢})**",
@@ -249,9 +251,14 @@ def register_music_commands(tree: app_commands.CommandTree):
                     await play_next(selected_bot, bot_guild)
                 return
 
-            track_item = ext_res['tracks'][0]
-            t_title = track_item.get('title', '未知歌曲')
-            t_artist = track_item.get('artist', '')
+            valid_tracks = [t for t in ext_res.get('tracks', []) if t and isinstance(t, dict)]
+            if not valid_tracks:
+                platform_label = "Spotify" if is_spotify else ("網易雲音樂" if is_netease else "Apple Music")
+                await interaction.followup.send(f"❌ 無法解析該 {platform_label} 連結中的歌曲資訊！")
+                return
+            track_item = valid_tracks[0]
+            t_title = track_item.get('title', '未知歌曲') or '未知歌曲'
+            t_artist = track_item.get('artist', '') or ''
             title_str = f"{t_title} - {t_artist}" if t_artist else t_title
             search_q = f"ytsearch5:{t_title} {t_artist}".strip()
 
@@ -324,16 +331,20 @@ def register_music_commands(tree: app_commands.CommandTree):
                 await interaction.followup.send(f"❌ 讀取播放清單失敗: `{e}`")
                 return
 
-            entries = data.get('entries', []) if data else []
-            valid = [e for e in entries if e and (e.get('title') or e.get('url'))]
+            if not data or not isinstance(data, dict):
+                await interaction.followup.send("❌ 讀取播放清單失敗，查無內容！")
+                return
+
+            entries = data.get('entries', []) if isinstance(data, dict) else []
+            valid = [e for e in entries if e and isinstance(e, dict) and (e.get('title') or e.get('url'))]
             if not valid:
                 await interaction.followup.send("❌ 該播放清單中未找到任何有效歌曲！")
                 return
 
             added_count = 0
-            playlist_title = data.get('title', '播放清單')
+            playlist_title = data.get('title', '播放清單') or '播放清單'
             for e in valid[:200]:
-                title = e.get('title', '未知歌曲')
+                title = e.get('title', '未知歌曲') or '未知歌曲'
                 if title in ['[Deleted video]', '[Private video]']:
                     continue
                 vid = e.get('id')
@@ -341,7 +352,7 @@ def register_music_commands(tree: app_commands.CommandTree):
                 if not song_url and vid:
                     song_url = f"https://www.youtube.com/watch?v={vid}"
                 elif not song_url:
-                    raw_url = e.get('url', '')
+                    raw_url = e.get('url', '') or ''
                     if raw_url.startswith('http'):
                         song_url = raw_url
                     elif vid:
@@ -355,8 +366,8 @@ def register_music_commands(tree: app_commands.CommandTree):
                     'title': title,
                     'webpage_url': song_url,
                     'url': song_url,
-                    'duration': e.get('duration', 0),
-                    'thumbnail': e.get('thumbnail', '')
+                    'duration': e.get('duration', 0) or 0,
+                    'thumbnail': e.get('thumbnail', '') or ''
                 }, interaction.user)
                 state.queue.append(song)
                 added_count += 1
@@ -376,6 +387,7 @@ def register_music_commands(tree: app_commands.CommandTree):
                 await play_next(selected_bot, bot_guild)
             return
 
+        data = None
         try:
             data = await loop.run_in_executor(
                 MEDIA_EXECUTOR, lambda: get_thread_ytdl(extract_flat=False, noplaylist=True).extract_info(查詢, download=False)
@@ -390,11 +402,29 @@ def register_music_commands(tree: app_commands.CommandTree):
                 await interaction.followup.send(f"❌ 找不到該歌曲或解析失敗: `{e}`")
                 return
 
-        if 'entries' in data:
-            if not data['entries']:
+        if not data:
+            try:
+                sc_q = f"scsearch:{查詢}"
+                data = await loop.run_in_executor(
+                    MEDIA_EXECUTOR, lambda: get_thread_ytdl(extract_flat=False, noplaylist=True).extract_info(sc_q, download=False)
+                )
+            except Exception:
+                pass
+
+        if not data or not isinstance(data, dict):
+            await interaction.followup.send("❌ 找不到該歌曲或解析結果為空，請更換關鍵字！")
+            return
+
+        if 'entries' in data and data.get('entries') is not None:
+            valid_entries = [e for e in data['entries'] if e and isinstance(e, dict)]
+            if not valid_entries:
                 await interaction.followup.send("❌ 搜尋結果為空，請更換關鍵字！")
                 return
-            data = data['entries'][0]
+            data = valid_entries[0]
+
+        if not data or not isinstance(data, dict):
+            await interaction.followup.send("❌ 找不到有效歌曲資訊！")
+            return
 
         song = Song(data, interaction.user)
 
@@ -474,7 +504,7 @@ def register_music_commands(tree: app_commands.CommandTree):
             await interaction.followup.send(f"❌ 搜尋失敗: `{e}`")
             return
 
-        entries = [e for e in (data.get('entries', []) if data else []) if e and e.get('title')][:5]
+        entries = [e for e in (data.get('entries', []) if data and isinstance(data, dict) else []) if e and isinstance(e, dict) and e.get('title')][:5]
         if not entries:
             await interaction.followup.send(f"❌ 找不到與 `{關鍵字}` 相關的搜尋結果！")
             return

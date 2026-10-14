@@ -100,7 +100,7 @@ async def play_next(bot: Any, guild: discord.Guild):
             try:
                 state.active_engine = "⚡ Lavalink v4 (Opus Passthrough)"
                 filters = vc.filters
-                bb_gain = BASSBOOST_PRESETS.get(state.bassboost, {}).get("gain", 0.0)
+                bb_gain = (BASSBOOST_PRESETS.get(state.bassboost) or {}).get("gain", 0.0)
                 if bb_gain > 0:
                     filters.equalizer.set(bands=[
                         {"band": 0, "gain": bb_gain},
