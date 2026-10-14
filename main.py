@@ -64,6 +64,12 @@ EQ_PRESETS = {
     "8d": {"label": "🎧 8D 空間環繞立體聲", "ffmpeg": "apulsator=hz=0.125"}
 }
 
+class YTDLNullLogger:
+    def debug(self, msg): pass
+    def info(self, msg): pass
+    def warning(self, msg): pass
+    def error(self, msg): pass
+
 def get_ytdl_opts(extract_flat: bool = False, noplaylist: bool = True) -> dict:
     opts = {
         'format': 'bestaudio[ext=webm][acodec=opus][abr>=160]/bestaudio[format_id=251]/bestaudio/best',
@@ -75,12 +81,13 @@ def get_ytdl_opts(extract_flat: bool = False, noplaylist: bool = True) -> dict:
         'ignoreerrors': True,
         'quiet': True,
         'no_warnings': True,
+        'logger': YTDLNullLogger(),
         'default_search': 'ytsearch',
         'source_address': '0.0.0.0',
         'socket_timeout': 10,
-         'extractor_args': {
+        'extractor_args': {
             'youtube': {
-                'player_client': ['android', 'web'],
+                'player_client': ['android', 'web', 'mweb', 'ios'],
                 'skip': ['hls', 'dash']
             }
         },
@@ -95,7 +102,7 @@ def get_ytdl_opts(extract_flat: bool = False, noplaylist: bool = True) -> dict:
     return opts
 
 def get_ffmpeg_options(state: 'GuildMusicState') -> dict:
-    before = '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -probesize 32k -analyzeduration 0'
+    before = '-nostats -loglevel error -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -probesize 32k -analyzeduration 0'
     filters = []
     bb = BASSBOOST_PRESETS.get(state.bassboost, {}).get("ffmpeg")
     if bb:
@@ -149,23 +156,23 @@ class GuildMusicState:
 def _extract_media_info(data: Optional[dict]) -> Tuple[Optional[str], Optional[str], int]:
     if not data:
         return None, None, 0
-    target = data
-    if 'entries' in data and data['entries']:
-        for entry in data['entries']:
-            if entry:
-                target = entry
-                break
-
-    url = target.get('url')
-    if not url and 'formats' in target and target['formats']:
-        audio_formats = [f for f in target['formats'] if f.get('acodec') != 'none' and f.get('url')]
-        if audio_formats:
-            best_f = max(audio_formats, key=lambda f: (1 if f.get('acodec') == 'opus' else 0, f.get('abr') or 0))
-            url = best_f.get('url')
-
-    thumb = target.get('thumbnail', '')
-    dur = target.get('duration', 0)
-    return url, thumb, dur
+    entries = data.get('entries') if isinstance(data, dict) and 'entries' in data else [data]
+    if not entries:
+        entries = [data]
+    for target in entries:
+        if not target or not isinstance(target, dict):
+            continue
+        url = target.get('url')
+        if not url and 'formats' in target and target['formats']:
+            audio_formats = [f for f in target['formats'] if isinstance(f, dict) and f.get('acodec') != 'none' and f.get('url')]
+            if audio_formats:
+                best_f = max(audio_formats, key=lambda f: (1 if f.get('acodec') == 'opus' else 0, f.get('abr') or 0))
+                url = best_f.get('url')
+        if url:
+            thumb = target.get('thumbnail', '')
+            dur = target.get('duration', 0)
+            return url, thumb, dur
+    return None, None, 0
 
 def extract_stream_url_sync(song_url: str, song_title: str) -> Tuple[Optional[str], Optional[str], int]:
     if not ("spotify.com" in song_url or song_url.startswith("spotify:")):
@@ -175,32 +182,30 @@ def extract_stream_url_sync(song_url: str, song_title: str) -> Tuple[Optional[st
             stream_url, thumb, dur = _extract_media_info(data)
             if stream_url:
                 return stream_url, thumb, dur
-        except Exception as e:
-            print(f"[Extractor] 網址直接提取略過 ({song_title}): {e}")
+        except Exception:
+            pass
 
     if song_title:
         try:
-            print(f"[Extractor] 嘗試為【{song_title}】使用 YouTube 搜尋最佳音源...")
-            yt_query = f"ytsearch1:{song_title}"
+            clean_title = re.sub(r'[\(\[\{].*?[\)\]\}]', '', song_title).strip()
+            yt_query = f"ytsearch5:{clean_title or song_title}"
             ydl_yt = yt_dlp.YoutubeDL(get_ytdl_opts(extract_flat=False, noplaylist=True))
             yt_data = ydl_yt.extract_info(yt_query, download=False)
             stream_url, thumb, dur = _extract_media_info(yt_data)
             if stream_url:
                 return stream_url, thumb, dur
-        except Exception as e:
-            print(f"[Extractor] YouTube 搜尋失敗 ({song_title}): {e}")
+        except Exception:
+            pass
 
         try:
-            print(f"[Extractor] 嘗試為【{song_title}】使用 SoundCloud 備援音源...")
-            sc_query = f"scsearch1:{song_title}"
+            sc_query = f"scsearch3:{song_title}"
             ydl_sc = yt_dlp.YoutubeDL(get_ytdl_opts(extract_flat=False, noplaylist=True))
             sc_data = ydl_sc.extract_info(sc_query, download=False)
             stream_url, thumb, dur = _extract_media_info(sc_data)
             if stream_url:
-                print(f"[Extractor] 成功取得 SoundCloud 串流音源！")
                 return stream_url, thumb, dur
-        except Exception as e:
-            print(f"[Extractor] SoundCloud 備援失敗 ({song_title}): {e}")
+        except Exception:
+            pass
 
     return None, None, 0
 
@@ -1418,7 +1423,7 @@ def register_slash_commands(primary_bot: commands.Bot):
                     t_title = track_item.get('title', '未知歌曲')
                     t_artist = track_item.get('artist', '')
                     title_str = f"{t_title} - {t_artist}" if t_artist else t_title
-                    search_q = f"ytsearch1:{t_title} {t_artist}".strip()
+                    search_q = f"ytsearch5:{t_title} {t_artist}".strip()
                     song = Song({
                         'title': title_str,
                         'webpage_url': track_item.get('url') or 查詢,
@@ -1452,7 +1457,7 @@ def register_slash_commands(primary_bot: commands.Bot):
             t_title = track_item.get('title', '未知歌曲')
             t_artist = track_item.get('artist', '')
             title_str = f"{t_title} - {t_artist}" if t_artist else t_title
-            search_q = f"ytsearch1:{t_title} {t_artist}".strip()
+            search_q = f"ytsearch5:{t_title} {t_artist}".strip()
 
             yt_data = None
             try:
@@ -1460,8 +1465,11 @@ def register_slash_commands(primary_bot: commands.Bot):
                     None, lambda: yt_dlp.YoutubeDL(get_ytdl_opts(extract_flat=False, noplaylist=True)).extract_info(search_q, download=False)
                 )
                 if data and 'entries' in data and data['entries']:
-                    yt_data = data['entries'][0]
-                elif data and data.get('url'):
+                    for entry in data['entries']:
+                        if entry and (entry.get('url') or entry.get('formats')):
+                            yt_data = entry
+                            break
+                elif data and (data.get('url') or data.get('formats')):
                     yt_data = data
 
             except Exception:
@@ -1469,12 +1477,17 @@ def register_slash_commands(primary_bot: commands.Bot):
 
             if not yt_data:
                 try:
-                    sc_q = f"scsearch1:{t_title} {t_artist}".strip()
+                    sc_q = f"scsearch3:{t_title} {t_artist}".strip()
                     data = await loop.run_in_executor(
                         None, lambda: yt_dlp.YoutubeDL(get_ytdl_opts(extract_flat=False, noplaylist=True)).extract_info(sc_q, download=False)
                     )
                     if data and 'entries' in data and data['entries']:
-                        yt_data = data['entries'][0]
+                        for entry in data['entries']:
+                            if entry and (entry.get('url') or entry.get('formats')):
+                                yt_data = entry
+                                break
+                    elif data and (data.get('url') or data.get('formats')):
+                        yt_data = data
                 except Exception:
                     yt_data = None
 
