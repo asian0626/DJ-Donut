@@ -1,6 +1,6 @@
 import re
 import time
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Any
 from config import (
     get_thread_ytdl,
     get_cached_stream,
@@ -8,7 +8,6 @@ from config import (
     MEDIA_EXECUTOR,
     logger
 )
-from core.models import Song
 
 def _extract_media_info(data: Optional[dict]) -> Tuple[Optional[str], Optional[str], int]:
     if not data:
@@ -49,10 +48,14 @@ def _extract_media_info(data: Optional[dict]) -> Tuple[Optional[str], Optional[s
     return None, None, 0
 
 def extract_stream_url_sync(song_url: str, song_title: str) -> Tuple[Optional[str], Optional[str], int]:
-    cache_key = song_url or song_title
-    cached = get_cached_stream(cache_key)
-    if cached:
-        return cached
+    if song_url:
+        cached = get_cached_stream(song_url)
+        if cached:
+            return cached
+    if song_title:
+        cached = get_cached_stream(song_title)
+        if cached:
+            return cached
 
     stream_url, thumb, dur = None, None, 0
 
@@ -92,7 +95,10 @@ def extract_stream_url_sync(song_url: str, song_title: str) -> Tuple[Optional[st
             pass
 
     if stream_url:
-        set_cached_stream(cache_key, stream_url, thumb, dur)
+        if song_url:
+            set_cached_stream(song_url, stream_url, thumb, dur)
+        if song_title:
+            set_cached_stream(song_title, stream_url, thumb, dur)
         return stream_url, thumb, dur
 
     return None, None, 0
@@ -117,8 +123,9 @@ def _fetch_autoplay_sync(last_title: str) -> Optional[dict]:
         logger.error(f"[Autoplay Helper] {e}")
     return None
 
-async def fetch_autoplay_recommendation(last_played: Song, loop) -> Optional[Song]:
+async def fetch_autoplay_recommendation(last_played: Any, loop) -> Optional[Any]:
     entry = await loop.run_in_executor(MEDIA_EXECUTOR, lambda: _fetch_autoplay_sync(last_played.title))
     if entry:
+        from core.models import Song
         return Song(entry, requester=last_played.requester)
     return None

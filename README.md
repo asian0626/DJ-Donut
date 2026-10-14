@@ -2,7 +2,7 @@
 
 <div align="center">
 
-![Version](https://img.shields.io/badge/Version-v1.3.1-blue?logo=git)
+![Version](https://img.shields.io/badge/Version-v1.4.0-blue?logo=git)
 ![Python](https://img.shields.io/badge/Python-3.10%20%7C%203.11%20%7C%203.12-3776AB?logo=python&logoColor=white)
 ![Discord.py](https://img.shields.io/badge/Discord.py-v2.7.0%2B-5865F2?logo=discord&logoColor=white)
 ![Lavalink](https://img.shields.io/badge/Lavalink-v4.0%2B-FF3366?logo=audacity&logoColor=white)
@@ -228,6 +228,14 @@ discord-music-bot/
 ---
 
 ## Changelog
+
+### v1.4.0 (2026-10-15)
+- **Asynchronous Network Pipeline**: Switched track metadata fetching across Spotify, NetEase Cloud Music, and Apple Music from blocking urllib requests to non-blocking `aiohttp` with connection pooling, keeping the audio worker threads free for stream extraction.
+- **Instant Metadata Caching**: Added an in-memory metadata cache (1-hour TTL) for all resolved platform tracks and playlists, reducing repeat query times to sub-millisecond speeds.
+- **Fast Spotify oEmbed Resolution**: Optimized track lookups by hitting the lightweight official oEmbed endpoint (~150ms) before scraping full web embed HTML, significantly accelerating single-track playback.
+- **Thread-Safe Extractor Reuse**: Replaced ad-hoc `yt_dlp.YoutubeDL()` constructions with reusable thread-local extractors across all platform resolvers to prevent extractor initialization overhead.
+- **Dual-Key Stream Caching**: Stream URLs are now indexed by both track URL and song title, guaranteeing immediate cache hits across cross-platform searches and replay requests.
+- **Clean Shutdown Hook**: Automatically tears down connection pools and background HTTP sessions on bot shutdown.
 
 ### v1.3.1 (2026-10-15)
 - **Resolved `/play` NoneType Error**: Fixed `AttributeError: 'NoneType' object has no attribute 'get'` triggered when search queries returned restricted, deleted, or empty entries under yt-dlp `ignoreerrors=True`.

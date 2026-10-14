@@ -28,7 +28,8 @@ from config import (
     save_guild_setting,
     get_guild_setting,
     get_ffmpeg_options,
-    get_thread_ytdl
+    get_thread_ytdl,
+    close_http_session
 )
 from core import (
     Song,
@@ -89,13 +90,16 @@ async def main():
     print(f"🚀 正在初始化多房間音樂機器人矩陣 v{__version__} (共檢測到 {len(TOKENS)} 隻機器人配置)...")
     print("=" * 65)
 
-    tasks = []
-    for node_id, token in TOKENS:
-        node_bot = MusicNodeBot(node_id)
-        NODE_BOTS.append(node_bot)
-        tasks.append(node_bot.start(token))
+    try:
+        tasks = []
+        for node_id, token in TOKENS:
+            node_bot = MusicNodeBot(node_id)
+            NODE_BOTS.append(node_bot)
+            tasks.append(node_bot.start(token))
 
-    await asyncio.gather(*tasks)
+        await asyncio.gather(*tasks)
+    finally:
+        await close_http_session()
 
 if __name__ == "__main__":
     try:

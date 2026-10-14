@@ -6,12 +6,13 @@ import threading
 import logging
 from concurrent.futures import ThreadPoolExecutor
 from typing import Dict, Optional, List, Tuple, Any
+import aiohttp
 import yt_dlp
 from dotenv import load_dotenv
 
 load_dotenv()
 
-__version__ = "1.3.1"
+__version__ = "1.4.0"
 
 logging.basicConfig(
     level=logging.INFO,
@@ -150,6 +151,46 @@ def set_cached_stream(key: str, stream_url: str, thumb: Optional[str], dur: int,
             if len(STREAM_CACHE) > 500:
                 STREAM_CACHE.pop(next(iter(STREAM_CACHE)), None)
         STREAM_CACHE[key] = (stream_url, thumb, dur, now + ttl)
+
+METADATA_CACHE: Dict[str, Tuple[dict, float]] = {}
+METADATA_CACHE_LOCK = threading.Lock()
+
+def get_cached_metadata(key: str) -> Optional[dict]:
+    now = time.time()
+    with METADATA_CACHE_LOCK:
+        if key in METADATA_CACHE:
+            data, expire_at = METADATA_CACHE[key]
+            if expire_at > now:
+                return data
+            del METADATA_CACHE[key]
+    return None
+
+def set_cached_metadata(key: str, data: dict, ttl: int = 3600):
+    now = time.time()
+    with METADATA_CACHE_LOCK:
+        if len(METADATA_CACHE) > 1000:
+            expired_keys = [k for k, v in METADATA_CACHE.items() if v[1] <= now]
+            for k in expired_keys:
+                del METADATA_CACHE[k]
+            if len(METADATA_CACHE) > 1000:
+                METADATA_CACHE.pop(next(iter(METADATA_CACHE)), None)
+        METADATA_CACHE[key] = (data, now + ttl)
+
+_HTTP_SESSION: Optional[aiohttp.ClientSession] = None
+
+async def get_http_session() -> aiohttp.ClientSession:
+    global _HTTP_SESSION
+    if _HTTP_SESSION is None or _HTTP_SESSION.closed:
+        connector = aiohttp.TCPConnector(limit=50, ttl_dns_cache=300, ssl=False)
+        timeout = aiohttp.ClientTimeout(total=15, connect=5)
+        _HTTP_SESSION = aiohttp.ClientSession(connector=connector, timeout=timeout)
+    return _HTTP_SESSION
+
+async def close_http_session():
+    global _HTTP_SESSION
+    if _HTTP_SESSION and not _HTTP_SESSION.closed:
+        await _HTTP_SESSION.close()
+        _HTTP_SESSION = None
 
 def load_all_guild_settings() -> dict:
     if os.path.exists(SETTINGS_FILE):
