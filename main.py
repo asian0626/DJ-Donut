@@ -20,7 +20,7 @@ from lyrics import get_lyrics
 
 load_dotenv()
 
-__version__ = "1.0.3"
+__version__ = "1.0.4"
 
 try:
     import wavelink
@@ -153,6 +153,9 @@ class GuildMusicState:
         self.autoplay: bool = False
         self.mode_247: bool = True
         self.lang: Optional[str] = None
+        self.start_time: float = 0.0
+        self.paused_duration: float = 0.0
+        self.pause_timestamp: float = 0.0
 
 def _extract_media_info(data: Optional[dict]) -> Tuple[Optional[str], Optional[str], int]:
     if not data:
@@ -998,7 +1001,7 @@ def is_vc_paused(vc) -> bool:
 def is_vc_active(vc) -> bool:
     return is_vc_playing(vc) or is_vc_paused(vc)
 
-async def safe_pause_resume(vc) -> str:
+async def safe_pause_resume(vc, state: Optional['GuildMusicState'] = None) -> str:
     if not vc:
         return "none"
     if hasattr(vc, 'paused'):
@@ -1007,20 +1010,30 @@ async def safe_pause_resume(vc) -> str:
                 await vc.pause(False)
             else:
                 vc.pause(False)
+            if state and state.pause_timestamp > 0:
+                state.paused_duration += time.time() - state.pause_timestamp
+                state.pause_timestamp = 0.0
             return "resumed"
         else:
             if asyncio.iscoroutinefunction(vc.pause):
                 await vc.pause(True)
             else:
                 vc.pause(True)
+            if state:
+                state.pause_timestamp = time.time()
             return "paused"
     if is_vc_paused(vc):
         if hasattr(vc, 'resume') and callable(vc.resume):
             vc.resume()
+            if state and state.pause_timestamp > 0:
+                state.paused_duration += time.time() - state.pause_timestamp
+                state.pause_timestamp = 0.0
             return "resumed"
     elif is_vc_playing(vc):
         if hasattr(vc, 'pause') and callable(vc.pause):
             vc.pause()
+            if state:
+                state.pause_timestamp = time.time()
             return "paused"
     return "none"
 
@@ -1054,27 +1067,88 @@ async def safe_disconnect(vc):
     except Exception as e:
         print(f"[Safe Disconnect Error] {e}")
 
+def get_playback_elapsed(state: GuildMusicState) -> int:
+    if not state.current or state.start_time == 0:
+        return 0
+    now = time.time()
+    if state.pause_timestamp > 0:
+        elapsed = state.pause_timestamp - state.start_time - state.paused_duration
+    else:
+        elapsed = now - state.start_time - state.paused_duration
+    elapsed = max(0, int(elapsed))
+    if state.current.duration and state.current.duration > 0:
+        elapsed = min(elapsed, state.current.duration)
+    return elapsed
+
+def make_progress_bar(elapsed: int, total: int, length: int = 14) -> str:
+    if not total or total <= 0:
+        return "🔴 `LIVE 直播音訊`"
+    percent = min(1.0, max(0.0, elapsed / total))
+    pos = int(percent * length)
+    pos = min(pos, length - 1)
+    bar = "━" * pos + "🔘" + "─" * (length - 1 - pos)
+    return f"`{format_duration(elapsed)}` {bar} `{format_duration(total)}`"
+
+def get_platform_badge(url: str, uploader: str) -> Tuple[str, int]:
+    u = (url or "").lower()
+    up = (uploader or "").lower()
+    if "spotify" in u or "spotify" in up:
+        return "Spotify", 0x1DB954
+    elif "163.com" in u or "163cn" in u or "163.lu" in u or "netease" in up or "網易" in up:
+        return "網易雲音樂", 0xC20C0C
+    elif "apple.com" in u or "apple.co" in u or "apple" in up:
+        return "Apple Music", 0xFC3C44
+    elif "soundcloud" in u:
+        return "SoundCloud", 0xFF5500
+    return "YouTube Music", 0xFF0000
+
 class MusicControllerView(discord.ui.View):
     def __init__(self, bot: 'MusicNodeBot', state: GuildMusicState):
         super().__init__(timeout=None)
         self.bot = bot
         self.state = state
+        self._update_button_states()
 
-    @discord.ui.button(emoji="⏯️", style=discord.ButtonStyle.primary, custom_id="music_play_pause")
+    def _update_button_states(self):
+        for child in self.children:
+            if isinstance(child, discord.ui.Button):
+                if child.custom_id == "music_loop":
+                    if self.state.loop_mode == 'single':
+                        child.emoji = "🔂"
+                        child.label = "單曲"
+                        child.style = discord.ButtonStyle.success
+                    elif self.state.loop_mode == 'queue':
+                        child.emoji = "🔁"
+                        child.label = "歌單"
+                        child.style = discord.ButtonStyle.primary
+                    else:
+                        child.emoji = "🔁"
+                        child.label = "循環"
+                        child.style = discord.ButtonStyle.secondary
+                elif child.custom_id == "music_autoplay":
+                    child.style = discord.ButtonStyle.success if self.state.autoplay else discord.ButtonStyle.secondary
+
+    @discord.ui.button(emoji="⏮️", style=discord.ButtonStyle.secondary, row=0, custom_id="music_replay")
+    async def replay(self, interaction: discord.Interaction, button: discord.ui.Button):
+        vc = interaction.guild.voice_client
+        if not vc or not self.state.current:
+            await interaction.response.send_message(t('not_playing', interaction), ephemeral=True)
+            return
+        self.state.queue.appendleft(self.state.current)
+        await safe_stop(vc)
+        await interaction.response.send_message("⏮️ 重播當前歌曲！", ephemeral=True)
+
+    @discord.ui.button(emoji="⏯️", style=discord.ButtonStyle.primary, row=0, custom_id="music_play_pause")
     async def play_pause(self, interaction: discord.Interaction, button: discord.ui.Button):
         vc = interaction.guild.voice_client
         if not vc:
             await interaction.response.send_message(t('no_bot_in_room', interaction), ephemeral=True)
             return
-        res = await safe_pause_resume(vc)
-        if res == "resumed":
-            await interaction.response.send_message(t('resumed', interaction, bot_name=self.bot.node_name), ephemeral=True)
-        elif res == "paused":
-            await interaction.response.send_message(t('paused', interaction, bot_name=self.bot.node_name), ephemeral=True)
-        else:
-            await interaction.response.send_message(t('not_playing', interaction), ephemeral=True)
+        res = await safe_pause_resume(vc, self.state)
+        embed = build_nowplaying_embed(self.bot, self.state.current, self.state, lang=resolve_locale(interaction))
+        await interaction.response.edit_message(embed=embed, view=self)
 
-    @discord.ui.button(emoji="⏭️", style=discord.ButtonStyle.secondary, custom_id="music_skip")
+    @discord.ui.button(emoji="⏭️", style=discord.ButtonStyle.secondary, row=0, custom_id="music_skip")
     async def skip(self, interaction: discord.Interaction, button: discord.ui.Button):
         vc = interaction.guild.voice_client
         if not vc:
@@ -1085,21 +1159,16 @@ class MusicControllerView(discord.ui.View):
         await safe_stop(vc)
         await interaction.response.send_message(t('skipped', interaction, bot_name=self.bot.node_name))
 
-    @discord.ui.button(emoji="🔁", style=discord.ButtonStyle.secondary, custom_id="music_loop")
+    @discord.ui.button(emoji="🔁", label="循環", style=discord.ButtonStyle.secondary, row=0, custom_id="music_loop")
     async def toggle_loop(self, interaction: discord.Interaction, button: discord.ui.Button):
         modes = ['off', 'single', 'queue']
         idx = modes.index(self.state.loop_mode)
-        next_mode = modes[(idx + 1) % len(modes)]
-        self.state.loop_mode = next_mode
-        mode_text = t(f'loop_{next_mode}', interaction)
-        await interaction.response.send_message(t('loop_mode_updated', interaction, bot_name=self.bot.node_name, mode=mode_text), ephemeral=True)
+        self.state.loop_mode = modes[(idx + 1) % len(modes)]
+        self._update_button_states()
+        embed = build_nowplaying_embed(self.bot, self.state.current, self.state, lang=resolve_locale(interaction))
+        await interaction.response.edit_message(embed=embed, view=self)
 
-    @discord.ui.button(emoji="📜", style=discord.ButtonStyle.secondary, custom_id="music_queue")
-    async def view_queue(self, interaction: discord.Interaction, button: discord.ui.Button):
-        embed = build_queue_embed(self.bot, self.state, lang=resolve_locale(interaction))
-        await interaction.response.send_message(embed=embed, ephemeral=True)
-
-    @discord.ui.button(emoji="⏹️", style=discord.ButtonStyle.danger, custom_id="music_stop")
+    @discord.ui.button(emoji="⏹️", style=discord.ButtonStyle.danger, row=0, custom_id="music_stop")
     async def stop(self, interaction: discord.Interaction, button: discord.ui.Button):
         vc = interaction.guild.voice_client
         self.state.queue.clear()
@@ -1109,6 +1178,67 @@ class MusicControllerView(discord.ui.View):
         await safe_disconnect(vc)
         await interaction.response.send_message(t('stopped_and_left', interaction, bot_name=self.bot.node_name))
 
+    @discord.ui.button(label="-10%", emoji="🔉", style=discord.ButtonStyle.secondary, row=1, custom_id="music_vol_down")
+    async def volume_down(self, interaction: discord.Interaction, button: discord.ui.Button):
+        vc = interaction.guild.voice_client
+        if not vc:
+            await interaction.response.send_message(t('not_playing', interaction), ephemeral=True)
+            return
+        self.state.volume = max(0.0, round(self.state.volume - 0.1, 2))
+        if hasattr(vc, 'source') and hasattr(vc.source, 'volume'):
+            vc.source.volume = self.state.volume
+        embed = build_nowplaying_embed(self.bot, self.state.current, self.state, lang=resolve_locale(interaction))
+        await interaction.response.edit_message(embed=embed, view=self)
+
+    @discord.ui.button(label="+10%", emoji="🔊", style=discord.ButtonStyle.secondary, row=1, custom_id="music_vol_up")
+    async def volume_up(self, interaction: discord.Interaction, button: discord.ui.Button):
+        vc = interaction.guild.voice_client
+        if not vc:
+            await interaction.response.send_message(t('not_playing', interaction), ephemeral=True)
+            return
+        self.state.volume = min(2.0, round(self.state.volume + 0.1, 2))
+        if hasattr(vc, 'source') and hasattr(vc.source, 'volume'):
+            vc.source.volume = self.state.volume
+        embed = build_nowplaying_embed(self.bot, self.state.current, self.state, lang=resolve_locale(interaction))
+        await interaction.response.edit_message(embed=embed, view=self)
+
+    @discord.ui.button(label="接歌", emoji="📻", style=discord.ButtonStyle.secondary, row=1, custom_id="music_autoplay")
+    async def toggle_autoplay(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.state.autoplay = not self.state.autoplay
+        self._update_button_states()
+        embed = build_nowplaying_embed(self.bot, self.state.current, self.state, lang=resolve_locale(interaction))
+        await interaction.response.edit_message(embed=embed, view=self)
+
+    @discord.ui.button(label="歌詞", emoji="💬", style=discord.ButtonStyle.secondary, row=1, custom_id="music_lyrics")
+    async def view_lyrics(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not self.state.current:
+            await interaction.response.send_message(t('not_playing', interaction), ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+        target_title = self.state.current.title
+        target_artist = self.state.current.uploader or ""
+        loop = asyncio.get_event_loop()
+        res = await loop.run_in_executor(None, lambda: get_lyrics(target_title, target_artist))
+        if not res:
+            await interaction.followup.send(t('lyrics_not_found', interaction, title=target_title), ephemeral=True)
+            return
+        display_title, lrc_text, is_synced = res
+        if len(lrc_text) > 4000:
+            lrc_text = lrc_text[:3990] + "\n..."
+        embed = discord.Embed(
+            title=f"💬 【{display_title}】即時歌詞",
+            description=lrc_text,
+            color=0x1DB954 if is_synced else 0x5865F2
+        )
+        sync_str = "⚡ 動態時間軸 (Synced)" if is_synced else "📝 純文字 (Plain)"
+        embed.set_footer(text=f"模式: {sync_str} • 資料庫: LRCLIB / Netease")
+        await interaction.followup.send(embed=embed, ephemeral=True)
+
+    @discord.ui.button(label="隊列", emoji="📜", style=discord.ButtonStyle.secondary, row=1, custom_id="music_queue")
+    async def view_queue(self, interaction: discord.Interaction, button: discord.ui.Button):
+        embed = build_queue_embed(self.bot, self.state, lang=resolve_locale(interaction))
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
 def build_nowplaying_embed(bot: 'MusicNodeBot', song: Song, state: GuildMusicState, lang: Optional[str] = None) -> discord.Embed:
     guild_lang = lang or resolve_locale(guild_id=state.guild_id)
     loop_str = t(f'loop_{state.loop_mode}', lang=guild_lang)
@@ -1116,66 +1246,100 @@ def build_nowplaying_embed(bot: 'MusicNodeBot', song: Song, state: GuildMusicSta
     guild = bot.get_guild(state.guild_id)
     vc = guild.voice_client if guild else None
     bitrate_str = "128 kbps"
-    bitrate_val = 128
-    is_low_bitrate = False
     if vc and hasattr(vc, 'channel') and vc.channel and hasattr(vc.channel, 'bitrate') and vc.channel.bitrate:
-        bitrate_val = vc.channel.bitrate // 1000
-        bitrate_str = f"{bitrate_val} kbps"
-        if vc.channel.bitrate < 96000:
-            is_low_bitrate = True
+        bitrate_str = f"{vc.channel.bitrate // 1000} kbps"
 
     bb_label = BASSBOOST_PRESETS.get(state.bassboost, {}).get("label", "關閉")
     eq_label = EQ_PRESETS.get(state.filter, {}).get("label", "原音直通")
+    platform_name, embed_color = get_platform_badge(song.url, song.uploader)
+
+    elapsed = get_playback_elapsed(state)
+    dur = song.duration or 0
+    progress_line = make_progress_bar(elapsed, dur, length=15)
 
     embed = discord.Embed(
-        title=t('now_playing_title', lang=guild_lang, node_name=bot.node_name),
-        description=f"**[{song.title}]({song.url})**",
-        color=0x9B59B6
+        title=f"💿 正在播放 • {platform_name}",
+        description=f"### [{song.title}]({song.url})\n👤 演出者: **{song.uploader or '未知演出者'}**\n\n{progress_line}",
+        color=embed_color
     )
     if song.thumbnail:
         embed.set_thumbnail(url=song.thumbnail)
-    embed.add_field(name=t('field_duration', lang=guild_lang), value=f"`{format_duration(song.duration, lang=guild_lang)}`", inline=True)
-    embed.add_field(name=t('field_requester', lang=guild_lang), value=song.requester.mention, inline=True)
-    embed.add_field(name=t('field_loop_mode', lang=guild_lang), value=f"`{loop_str}`", inline=True)
-    embed.add_field(name=t('field_volume', lang=guild_lang), value=f"`{int(state.volume * 100)}%`", inline=True)
-    embed.add_field(name=t('field_bitrate', lang=guild_lang), value=f"`48kHz / {bitrate_str}`", inline=True)
-    embed.add_field(name=t('field_engine', lang=guild_lang), value=f"`{state.active_engine}`", inline=True)
-    embed.add_field(name=t('field_dsp_filter', lang=guild_lang), value=f"`{eq_label}`", inline=True)
-    embed.add_field(name=t('field_bassboost', lang=guild_lang), value=f"`{bb_label}`", inline=True)
-    embed.add_field(name=t('field_queue_count', lang=guild_lang), value=f"`{len(state.queue)}`", inline=True)
 
-    if is_low_bitrate:
-        embed.set_footer(text=t('tip_bitrate_low', lang=guild_lang, node_name=bot.node_name, bitrate=bitrate_val))
-    else:
-        embed.set_footer(text=t('tip_krisp', lang=guild_lang, node_name=bot.node_name))
+    embed.add_field(name="👤 點播者", value=song.requester.mention, inline=True)
+    embed.add_field(name="🔊 音量", value=f"`{int(state.volume * 100)}%`", inline=True)
+    embed.add_field(name="🔁 循環模式", value=f"`{loop_str}`", inline=True)
+    embed.add_field(name="🎛️ 音訊引擎", value=f"`{state.active_engine}`", inline=True)
+    embed.add_field(name="📻 自動接歌", value=f"`{'開啟' if state.autoplay else '關閉'}`", inline=True)
+    embed.add_field(name="📜 待播隊列", value=f"`{len(state.queue)} 首歌曲`", inline=True)
+
+    bot_name = bot.node_name
+    embed.set_footer(
+        text=f"DJ Donut • {bot_name} • 48kHz / {bitrate_str} • EQ: {eq_label} • 重低音: {bb_label}"
+    )
     return embed
 
 def build_queue_embed(bot: 'MusicNodeBot', state: GuildMusicState, lang: Optional[str] = None) -> discord.Embed:
     guild_lang = lang or resolve_locale(guild_id=state.guild_id)
     embed = discord.Embed(
-        title=t('queue_title', lang=guild_lang, node_name=bot.node_name),
-        color=0x3498DB
+        title=f"📜 【{bot.node_name}】語音房待播清單",
+        color=0x5865F2
     )
     if state.current:
-        cur_desc = f"**[{state.current.title}]({state.current.url})** (`{format_duration(state.current.duration, lang=guild_lang)}`) | {state.current.requester.mention}"
+        elapsed = get_playback_elapsed(state)
+        dur = state.current.duration
+        time_tag = f"`[{format_duration(elapsed)} / {format_duration(dur)}]`" if dur else "`[LIVE 直播]`"
+        embed.description = f"### ▶️ 現正播放\n**[{state.current.title}]({state.current.url})**\n{time_tag} • 由 {state.current.requester.mention} 點播\n"
+    else:
+        embed.description = "⏸️ **目前沒有正在播放的歌曲**\n使用 `/play <歌曲或網址>` 即可開始點播！\n"
+
+    if not state.queue:
         embed.add_field(
-            name=f"▶️ {t('status_playing', lang=guild_lang)}",
-            value=cur_desc,
+            name="📋 待播歌曲 (0)",
+            value="*目前隊列為空，快使用 `/play` 點歌，或開啟 `/autoplay` 電台自動接歌！*",
             inline=False
         )
     else:
-        embed.description = t('not_playing', lang=guild_lang)
-
-    if not state.queue:
-        embed.add_field(name=f"⏳ {t('field_queue_count', lang=guild_lang)}", value=t('queue_empty', lang=guild_lang), inline=False)
-    else:
+        total_seconds = sum(s.duration for s in state.queue if s.duration)
+        total_dur_str = format_duration(total_seconds) if total_seconds else "未知"
         queue_lines = []
         for i, s in enumerate(list(state.queue)[:10], start=1):
-            queue_lines.append(f"`{i}.` **[{s.title}]({s.url})** (`{format_duration(s.duration, lang=guild_lang)}`) — {s.requester.mention}")
-        more = len(state.queue) - 10
-        more_text = t('queue_more', lang=guild_lang, count=more) if more > 0 else ""
-        embed.add_field(name=f"⏳ {t('field_queue_count', lang=guild_lang)} ({len(state.queue)})", value="\n".join(queue_lines) + more_text, inline=False)
+            s_dur = f"`{format_duration(s.duration)}`" if s.duration else "`直播`"
+            queue_lines.append(f"`{i:02d}.` **[{s.title[:35]}]({s.url})** ({s_dur}) • {s.requester.mention}")
 
+        remaining = len(state.queue) - 10
+        if remaining > 0:
+            queue_lines.append(f"\n*...以及其他 **{remaining}** 首歌曲*")
+
+        header_meta = f"總計 `{len(state.queue)}` 首歌曲 • 預估總時長 `{total_dur_str}`\n\n"
+        embed.add_field(
+            name="📋 待播歌曲清單",
+            value=header_meta + "\n".join(queue_lines),
+            inline=False
+        )
+
+    loop_str = t(f'loop_{state.loop_mode}', lang=guild_lang)
+    embed.set_footer(
+        text=f"🔁 循環: {loop_str} • 📻 自動接歌: {'開啟' if state.autoplay else '關閉'} • 🔊 音量: {int(state.volume * 100)}%"
+    )
+    return embed
+
+def build_song_queued_embed(bot: 'MusicNodeBot', song: Song, state: GuildMusicState, pos: int, interaction: discord.Interaction) -> discord.Embed:
+    platform_name, embed_color = get_platform_badge(song.url, song.uploader)
+    dur_str = format_duration(song.duration, resolve_locale(interaction))
+    embed = discord.Embed(
+        title=f"✅ 已加入隊列 • {platform_name}",
+        description=f"### [{song.title}]({song.url})\n👤 演出者: **{song.uploader or '未知'}**",
+        color=embed_color
+    )
+    if song.thumbnail:
+        embed.set_thumbnail(url=song.thumbnail)
+    embed.add_field(name="⏱️ 歌曲時長", value=f"`{dur_str}`", inline=True)
+    embed.add_field(name="📍 播放順位", value=f"`#{pos}`", inline=True)
+    embed.add_field(name="🤖 服務節點", value=f"`{bot.node_name}`", inline=True)
+    embed.add_field(name="👤 點播者", value=interaction.user.mention, inline=True)
+    embed.add_field(name="📊 隊列總計", value=f"`{len(state.queue)} 首待播`", inline=True)
+    embed.add_field(name="🔊 音量設定", value=f"`{int(state.volume * 100)}%`", inline=True)
+    embed.set_footer(text="DJ Donut • 輸入 /nowplaying 查看控制器 • /queue 查看待播清單")
     return embed
 
 async def check_lavalink_health(uri: str, password: str) -> bool:
@@ -1365,6 +1529,9 @@ async def play_next(bot: MusicNodeBot, guild: discord.Guild):
     next_song = state.queue.popleft()
     state.current = next_song
     state.is_playing = True
+    state.start_time = time.time()
+    state.paused_duration = 0.0
+    state.pause_timestamp = 0.0
 
     if bot.lavalink_connected and HAS_WAVELINK and hasattr(vc, 'play') and hasattr(vc, 'filters'):
         if not next_song.wavelink_track:
@@ -1456,10 +1623,7 @@ async def play_next(bot: MusicNodeBot, guild: discord.Guild):
         ffmpeg_opts = get_ffmpeg_options(state)
         source = discord.FFmpegPCMAudio(stream_url, stderr=subprocess.DEVNULL, **ffmpeg_opts)
 
-        if state.volume != 1.0:
-            audio_source = discord.PCMVolumeTransformer(source, volume=state.volume)
-        else:
-            audio_source = source
+        audio_source = discord.PCMVolumeTransformer(source, volume=state.volume)
 
         def after_callback(error):
             if error:
@@ -1751,17 +1915,7 @@ def register_slash_commands(primary_bot: commands.Bot):
 
                     if is_vc_active(vc):
                         state.queue.append(song)
-                        embed = discord.Embed(
-                            title=t('song_queued', interaction, bot_name=selected_bot.node_name),
-                            description=f"**[{song.title}]({song.url})**",
-                            color=0x2ECC71
-                        )
-                        if song.thumbnail:
-                            embed.set_thumbnail(url=song.thumbnail)
-                        embed.add_field(name=t('field_duration', interaction), value=f"`{format_duration(song.duration, resolve_locale(interaction))}`", inline=True)
-                        embed.add_field(name=t('field_queue_pos', interaction), value=f"#{len(state.queue)}", inline=True)
-                        embed.add_field(name=t('field_engine', interaction), value="`Lavalink v4`", inline=True)
-                        embed.add_field(name=t('field_requester', interaction), value=interaction.user.mention, inline=True)
+                        embed = build_song_queued_embed(selected_bot, song, state, len(state.queue), interaction)
                         await interaction.followup.send(embed=embed)
                     else:
                         state.queue.append(song)
@@ -1894,17 +2048,7 @@ def register_slash_commands(primary_bot: commands.Bot):
 
             if is_vc_active(vc):
                 state.queue.append(song)
-                embed = discord.Embed(
-                    title=t('song_queued', interaction, bot_name=selected_bot.node_name),
-                    description=f"**[{song.title}]({song.url})**",
-                    color=embed_color
-                )
-                if song.thumbnail:
-                    embed.set_thumbnail(url=song.thumbnail)
-                embed.add_field(name=t('field_duration', interaction), value=f"`{format_duration(song.duration, resolve_locale(interaction))}`", inline=True)
-                embed.add_field(name=t('field_queue_pos', interaction), value=f"#{len(state.queue)}", inline=True)
-                embed.add_field(name=t('field_node', interaction), value=f"`{selected_bot.node_name}`", inline=True)
-                embed.add_field(name=t('field_requester', interaction), value=interaction.user.mention, inline=True)
+                embed = build_song_queued_embed(selected_bot, song, state, len(state.queue), interaction)
                 await interaction.followup.send(embed=embed)
             else:
                 state.queue.append(song)
@@ -1987,17 +2131,7 @@ def register_slash_commands(primary_bot: commands.Bot):
 
         if is_vc_active(vc):
             state.queue.append(song)
-            embed = discord.Embed(
-                title=t('song_queued', interaction, bot_name=selected_bot.node_name),
-                description=f"**[{song.title}]({song.url})**",
-                color=0x2ECC71
-            )
-            if song.thumbnail:
-                embed.set_thumbnail(url=song.thumbnail)
-            embed.add_field(name=t('field_duration', interaction), value=f"`{format_duration(song.duration, resolve_locale(interaction))}`", inline=True)
-            embed.add_field(name=t('field_queue_pos', interaction), value=f"#{len(state.queue)}", inline=True)
-            embed.add_field(name=t('field_node', interaction), value=f"`{selected_bot.node_name}`", inline=True)
-            embed.add_field(name=t('field_requester', interaction), value=interaction.user.mention, inline=True)
+            embed = build_song_queued_embed(selected_bot, song, state, len(state.queue), interaction)
             await interaction.followup.send(embed=embed)
         else:
             state.queue.append(song)
@@ -2010,46 +2144,116 @@ def register_slash_commands(primary_bot: commands.Bot):
     @tree.command(name="status", description="查看所有音樂機器人的即時連線、分流與伺服器進駐狀態儀表板")
     async def slash_status(interaction: discord.Interaction):
         guild_id = interaction.guild_id
-        guild_bots = []
+        total_bots = len(NODE_BOTS)
+        active_bots = 0
+        playing_bots = 0
+
         for b in NODE_BOTS:
             bg = get_bot_guild(b, guild_id, interaction.guild)
             if bg:
-                guild_bots.append((b, bg))
+                active_bots += 1
+                g_vc = (bg.voice_client if bg else None) or discord.utils.get(getattr(b, 'voice_clients', []), guild__id=guild_id)
+                if g_vc and is_vc_playing(g_vc):
+                    playing_bots += 1
+
+        load_pct = int((playing_bots / total_bots) * 100) if total_bots else 0
+        load_bar = "▰" * (playing_bots * 2) + "▱" * ((total_bots - playing_bots) * 2)
 
         embed = discord.Embed(
-            title=t('status_title', interaction),
-            description=t('status_desc', interaction, total=len(NODE_BOTS), joined=len(guild_bots)),
-            color=0x3498DB
+            title="🎛️ DJ Donut — 機器人矩陣調度儀表板",
+            description=f"**伺服器進駐節點: `{active_bots}/{total_bots}` 台**\n"
+                        f"📊 **叢集負載率: `{load_pct}%`** `[{load_bar}]`\n"
+                        f"⚡ 多房間獨立引擎: `48kHz Stereo / 384kbps VBR`\n\n"
+                        f"━━━━━━━━━━━━━━━━━━━━━━━━━",
+            color=0x5865F2
         )
 
-        for b in NODE_BOTS:
+        INVITE_URLS = {
+            1: "https://discord.com/oauth2/authorize?client_id=1549028983641743462&permissions=8&integration_type=0&scope=bot",
+            2: "https://discord.com/oauth2/authorize?client_id=1549258600155979956&permissions=8&integration_type=0&scope=bot",
+            3: "https://discord.com/oauth2/authorize?client_id=1549259098761990184&permissions=8&integration_type=0&scope=bot",
+            4: "https://discord.com/oauth2/authorize?client_id=1549259563646062743&permissions=8&integration_type=0&scope=bot",
+            5: "https://discord.com/oauth2/authorize?client_id=1549259919696592976&permissions=8&integration_type=0&scope=bot",
+        }
+
+        for idx, b in enumerate(NODE_BOTS, start=1):
             guild = get_bot_guild(b, guild_id, interaction.guild)
             state = b.get_state(guild_id)
             g_vc = (guild.voice_client if guild else None) or discord.utils.get(getattr(b, 'voice_clients', []), guild__id=guild_id)
 
             if not guild:
+                invite_link = INVITE_URLS.get(idx, "")
+                link_text = f"> 🔗 [點此邀請 {idx} 號機器人進群]({invite_link})" if invite_link else "> 尚未加入此伺服器"
                 embed.add_field(
-                    name=f"🤖 {b.node_name} — {t('status_unjoined', interaction)}",
-                    value=t('status_unjoined_desc', interaction),
-                    inline=True
+                    name=f"⚪ 【{b.node_name}】未加入此伺服器",
+                    value=link_text,
+                    inline=False
                 )
             elif g_vc and is_vc_connected(g_vc):
                 vc_name = g_vc.channel.name if (hasattr(g_vc, 'channel') and g_vc.channel) else "Voice"
-                cur_title = state.current.title if state.current else "-"
-                status_icon = t('status_playing', interaction) if is_vc_playing(g_vc) else (t('status_paused', interaction) if is_vc_paused(g_vc) else "🟢 Connected")
+                is_play = is_vc_playing(g_vc)
+                cur_title = state.current.title if state.current else "未知歌曲"
+                cur_url = state.current.url if state.current else ""
+                cur_dur = format_duration(state.current.duration) if (state.current and state.current.duration) else "LIVE"
+                elapsed = format_duration(get_playback_elapsed(state))
+                status_badge = "🟢 正在播放" if is_play else "🟡 暫停中"
+                song_link = f"**[{cur_title[:32]}]({cur_url})**" if cur_url else f"**{cur_title[:32]}**"
                 embed.add_field(
-                    name=f"🤖 {b.node_name} — {status_icon}",
-                    value=f"📍 `#{vc_name}` | 🎵 **{cur_title[:28]}** | 📜 `{len(state.queue)}`",
+                    name=f"{status_badge} • {b.node_name}",
+                    value=f"> 🔊 語音房間: **#{vc_name}**\n"
+                          f"> 🎵 播放歌曲: {song_link} `[{elapsed}/{cur_dur}]`\n"
+                          f"> 📊 待播隊列: `{len(state.queue)} 首` • 音量: `{int(state.volume * 100)}%`",
                     inline=False
                 )
             else:
                 embed.add_field(
-                    name=f"🤖 {b.node_name} — {t('status_idle', interaction)}",
-                    value="`/play`",
-                    inline=True
+                    name=f"🟢 【{b.node_name}】空閒待命中",
+                    value="> 💤 節點已就緒，於任意語音房輸入 `/play` 將自動指派進房！",
+                    inline=False
                 )
 
-        embed.set_footer(text=f"DJ Donut v{__version__} | Multi-Room Music Cluster")
+        embed.set_footer(text=f"DJ Donut v{__version__} | Multi-Room Music Matrix | 支援 5 房獨立播放")
+        await interaction.response.send_message(embed=embed)
+
+    @tree.command(name="help", description="查看 DJ Donut 現代化多房間音樂機器人使用指南與指令清單")
+    async def slash_help(interaction: discord.Interaction):
+        embed = discord.Embed(
+            title="🎧 DJ Donut — 現代化音樂機器人使用指南",
+            description="支援多房間無縫分流播放、高解析度進度條、即時動態歌詞與錄音室等化器。\n\n"
+                        "━━━━━━━━━━━━━━━━━━━━━━━━━",
+            color=0x5865F2
+        )
+        embed.add_field(
+            name="🎵 音樂播放指令",
+            value="> `/play <查詢>` — 智慧點歌（自動派發空閒機器人進房）\n"
+                  "> `/nowplaying` — 開啟進度條與全功能互動控制器\n"
+                  "> `/queue` — 檢視當前語音房的待播歌單隊列\n"
+                  "> `/skip` — 跳過當前歌曲\n"
+                  "> `/stop` — 停止播放並讓機器人退出語音房",
+            inline=False
+        )
+        embed.add_field(
+            name="📻 電台與進階模式",
+            value="> `/autoplay` — 開啟/關閉智慧自動接歌電台模式\n"
+                  "> `/lyrics [歌曲]` — 查詢即時動態時間軸歌詞與純文字歌詞\n"
+                  "> `/247` — 切換 24/7 永久常駐語音房模式",
+            inline=False
+        )
+        embed.add_field(
+            name="🎚️ 音質與錄音室等化器",
+            value="> `/bassboost <強度>` — 即時調節 +4dB ~ +20dB 重低音\n"
+                  "> `/filter <預設>` — 套用專業濾鏡 (搖滾/流行/人聲/夜核/8D等)\n"
+                  "> `/bitrate [kbps]` — 查看或一鍵拉滿語音房最高音質 (至 384k)\n"
+                  "> `/engine` — 雙引擎架構即時運作狀態與音訊規格檢視",
+            inline=False
+        )
+        embed.add_field(
+            name="🌐 叢集與語言設定",
+            value="> `/status` — 查看 1～5 號機器人獨立運作與分流儀表板\n"
+                  "> `/language <語系>` — 切換伺服器預設語言 (支援 6 國語系)",
+            inline=False
+        )
+        embed.set_footer(text=f"DJ Donut v{__version__} • 支援 Spotify / 網易雲 / Apple Music / YouTube")
         await interaction.response.send_message(embed=embed)
 
     @tree.command(name="skip", description="跳過你當前語音房的機器人歌曲")

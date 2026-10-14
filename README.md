@@ -2,7 +2,7 @@
 
 <div align="center">
 
-![Version](https://img.shields.io/badge/Version-v1.0.3-blue?logo=git)
+![Version](https://img.shields.io/badge/Version-v1.0.4-blue?logo=git)
 ![Python](https://img.shields.io/badge/Python-3.10%20%7C%203.11%20%7C%203.12-3776AB?logo=python&logoColor=white)
 ![Discord.py](https://img.shields.io/badge/Discord.py-v2.7.0%2B-5865F2?logo=discord&logoColor=white)
 ![Lavalink](https://img.shields.io/badge/Lavalink-v4.0%2B-FF3366?logo=audacity&logoColor=white)
@@ -72,6 +72,12 @@
   - Adjust bass boost with `/bassboost`, from +4 dB to +20 dB.
   - Use `/filter` to select sound presets, including Rock, Pop, Clear Vocal, Crisp Treble, Nightcore, Vaporwave, and 8D.
 
+- **Modern UI & Interactive Controls（現代化視覺介面與全能控制器）**:
+  - **Dynamic Scrubber Progress Bar**: 即時動態時間軸進度條（`01:23 ━━━━━━🔘─────── 04:29`），精確換算暫停與播放時長。
+  - **Platform Badge & Color Accent**: 根據歌曲來源（Spotify, Netease, Apple Music, YouTube, SoundCloud）自動變更卡片主題色與標籤。
+  - **10-Button Dual-Row Controller**: 提供播放/暫停、上一首重播、跳過、循環模式、停止退出、即時音量微調 (`🔉 -10%` / `🔊 +10%`)、電台接歌開關、一鍵歌詞視窗、以及即時隊列檢視。
+  - **Cluster Status Dashboard**: 視覺化叢集負載條（`▰▰▰▱▱`）、各節點即時播放進度，以及未進群機器人的一鍵邀請鈕。
+
 - **Resource usage（資源使用量）**:
   - The project targets roughly 70–120 MB of RAM for all five bots combined. Actual usage depends on the workload and environment.
 
@@ -81,6 +87,7 @@
 
 | Command (指令) | Parameters (參數) | Description (EN) | 說明 (繁體中文) |
 | :--- | :--- | :--- | :--- |
+| **/help** | *None* | Modern interactive manual with command categories | 查看現代化分類指令使用指南 |
 | **/play** | `query`, `[bot_id]` | Smart play (Auto-dispatches idle bot or targeted bot 1~5) | 點歌（自動分配可用機器人，也可指定 1～5 號） |
 | **/autoplay** | *None* | Toggle smart autoplay radio mode when queue ends | 切換自動接歌模式 (歌單結束自動接續播放) |
 | **/lyrics** | `[song]` | View synced or plain lyrics for current / queried song | 查詢當前或指定歌曲的動態/純文字即時歌詞 |
@@ -215,6 +222,12 @@ flowchart TD
 ---
 
 ## Release Notes / 更新日誌
+
+### v1.0.4 (2026-10-14)
+- 🎨 **全新現代化播放介面**：導入高解析度動態時間軸進度條（Scrubber Bar）、多平台識別色彩（Spotify, Apple Music, 網易雲等）與沉浸式卡片排版。
+- 🎛️ **雙排十鍵全能互動控制器**：升級為兩排 10 顆互動按鈕，支援免中斷音訊即時微調音量 (`-10%` / `+10%`)、一鍵查詢歌詞、隨選隊列、重播、單曲/歌單循環與電台接歌。
+- 📊 **叢集儀表板與狀態視覺化**：重構 `/status` 導入叢集總負載指示條（`▰▰▰▱▱`）、即時播放進度、以及未加入伺服器節點的一鍵邀請連結。
+- 📖 **新增現代化幫助指南 (`/help`)**：提供精美結構化分類指南，快速掌握所有播放、音效與管理指令。
 
 ### v1.0.3 (2026-10-14)
 - 🎵 **新增網易雲音樂支援**：全面支援網易雲單曲、歌單、專輯及官方短網址（`163cn.tv` / `163.lu`）直貼播放，免額外 API Key 即時解析。
