@@ -2,7 +2,7 @@
 
 <div align="center">
 
-![Version](https://img.shields.io/badge/Version-v1.0.4-blue?logo=git)
+![Version](https://img.shields.io/badge/Version-v1.0.5-blue?logo=git)
 ![Python](https://img.shields.io/badge/Python-3.10%20%7C%203.11%20%7C%203.12-3776AB?logo=python&logoColor=white)
 ![Discord.py](https://img.shields.io/badge/Discord.py-v2.7.0%2B-5865F2?logo=discord&logoColor=white)
 ![Lavalink](https://img.shields.io/badge/Lavalink-v4.0%2B-FF3366?logo=audacity&logoColor=white)
@@ -222,6 +222,12 @@ flowchart TD
 ---
 
 ## Release Notes / 更新日誌
+
+### v1.0.5 (2026-10-15)
+- 🚀 **徹底消除播放忽快忽慢與卡頓（加快/慢半拍）**：
+  - **導入 5 秒動態音訊環形緩衝區 (`BufferedAudioSource`)**：以獨立背景執行緒預先解碼並快取 5 秒音訊（250 幀），解耦即時播放與網路拉流，徹底消除網路微延遲導致的 Discord WebRTC 自動快轉（加快）與掉拍卡頓（慢半拍）。
+  - **重構 YouTube 串流客戶端與標頭**：改用穩定之 `tv` / `web` / `ios` 客戶端架構，移除引發嚴格限速（50KB/s）與中斷的 `android` 標籤，並注入完整瀏覽器請求標頭。
+  - **優化 FFmpeg 串流握手參數**：啟用 `-http_persistent 0` 杜絕長連線閒置中斷，縮減斷線重連間隔至 2 秒，擴增分析時長（`analyzeduration 1000000` / `probesize 256k`）確保精準時鐘同步與取樣率對齊。
 
 ### v1.0.4 (2026-10-14)
 - 🎨 **全新現代化播放介面**：導入高解析度動態時間軸進度條（Scrubber Bar）、多平台識別色彩（Spotify, Apple Music, 網易雲等）與沉浸式卡片排版。

@@ -5,6 +5,8 @@ import asyncio
 import os
 import time
 import subprocess
+import threading
+import queue
 from collections import deque
 from typing import Dict, Optional, List, Tuple
 import yt_dlp
@@ -20,7 +22,7 @@ from lyrics import get_lyrics
 
 load_dotenv()
 
-__version__ = "1.0.4"
+__version__ = "1.0.5"
 
 try:
     import wavelink
@@ -85,11 +87,11 @@ def get_ytdl_opts(extract_flat: bool = False, noplaylist: bool = True) -> dict:
         'logger': YTDLNullLogger(),
         'default_search': 'ytsearch',
         'source_address': '0.0.0.0',
-        'socket_timeout': 10,
+        'socket_timeout': 15,
         'extractor_args': {
             'youtube': {
-                'player_client': ['android', 'web', 'mweb', 'ios'],
-                'skip': ['hls', 'dash']
+                'player_client': ['tv', 'web', 'ios'],
+                'skip': ['hls']
             }
         },
         'http_headers': {
@@ -103,7 +105,13 @@ def get_ytdl_opts(extract_flat: bool = False, noplaylist: bool = True) -> dict:
     return opts
 
 def get_ffmpeg_options(state: 'GuildMusicState') -> dict:
-    before = '-nostats -loglevel fatal -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -reconnect_on_network_error 1 -reconnect_on_http_error 4xx,5xx -probesize 32k -analyzeduration 0'
+    before = (
+        '-nostats -loglevel fatal '
+        '-headers "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36\r\nAccept: */*\r\n" '
+        '-http_persistent 0 '
+        '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 2 -reconnect_on_network_error 1 -reconnect_on_http_error 4xx,5xx '
+        '-probesize 256k -analyzeduration 1000000'
+    )
     filters = []
     bb = BASSBOOST_PRESETS.get(state.bassboost, {}).get("ffmpeg")
     if bb:
@@ -113,10 +121,77 @@ def get_ffmpeg_options(state: 'GuildMusicState') -> dict:
         filters.append(eq)
 
     if filters:
-        opt = f"-threads 1 -vn -af \"{','.join(filters)}\""
+        opt = f"-vn -af \"{','.join(filters)}\""
     else:
-        opt = "-threads 1 -vn"
+        opt = "-vn"
     return {'before_options': before, 'options': opt}
+
+class BufferedAudioSource(discord.AudioSource):
+    def __init__(self, source: discord.AudioSource, prefetch_frames: int = 50, max_frames: int = 250):
+        self.source = source
+        self.buffer = queue.Queue(maxsize=max_frames)
+        self.prefetch_frames = prefetch_frames
+        self._stop_event = threading.Event()
+        self._finished = False
+        self._started = False
+        self._empty_count = 0
+        self._thread = threading.Thread(target=self._worker, daemon=True)
+        self._thread.start()
+
+    def _worker(self):
+        while not self._stop_event.is_set():
+            try:
+                data = self.source.read()
+                if not data:
+                    self._finished = True
+                    break
+                while not self._stop_event.is_set():
+                    try:
+                        self.buffer.put(data, timeout=0.1)
+                        break
+                    except queue.Full:
+                        continue
+            except Exception:
+                self._finished = True
+                break
+
+    def is_opus(self) -> bool:
+        return False
+
+    def read(self) -> bytes:
+        if self._stop_event.is_set():
+            return b''
+        if not self._started:
+            self._started = True
+            start_wait = time.time()
+            while time.time() - start_wait < 1.5:
+                if self._stop_event.is_set() or self._finished or self.buffer.qsize() >= self.prefetch_frames:
+                    break
+                time.sleep(0.01)
+        try:
+            data = self.buffer.get(timeout=0.02)
+            self._empty_count = 0
+            return data
+        except queue.Empty:
+            if self._finished and self.buffer.empty():
+                return b''
+            self._empty_count += 1
+            if self._empty_count > 250:
+                return b''
+            return bytes(3840)
+
+    def cleanup(self):
+        self._stop_event.set()
+        try:
+            while not self.buffer.empty():
+                try:
+                    self.buffer.get_nowait()
+                except queue.Empty:
+                    break
+        except Exception:
+            pass
+        if hasattr(self.source, 'cleanup') and callable(self.source.cleanup):
+            self.source.cleanup()
 
 def format_duration(seconds: Optional[int], lang: str = 'zh-TW') -> str:
     if not seconds:
@@ -1622,8 +1697,8 @@ async def play_next(bot: MusicNodeBot, guild: discord.Guild):
     try:
         ffmpeg_opts = get_ffmpeg_options(state)
         source = discord.FFmpegPCMAudio(stream_url, stderr=subprocess.DEVNULL, **ffmpeg_opts)
-
-        audio_source = discord.PCMVolumeTransformer(source, volume=state.volume)
+        buffered_source = BufferedAudioSource(source, prefetch_frames=50, max_frames=250)
+        audio_source = discord.PCMVolumeTransformer(buffered_source, volume=state.volume)
 
         def after_callback(error):
             if error:
