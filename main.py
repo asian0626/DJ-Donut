@@ -1,77 +1,12 @@
 import asyncio
 from config import (
     __version__,
-    logger,
-    BotError,
-    AudioSourceError,
-    TrackNotFoundError,
-    VoiceConnectionError,
-    PermissionDeniedError,
     TOKENS,
-    LAVALINK_URI,
-    LAVALINK_PASSWORD,
-    COOKIES_FILE,
-    YTDL_OPTIONS,
-    FFMPEG_OPTIONS,
-    BASSBOOST_PRESETS,
-    AUDIO_FILTER_PRESETS,
-    GUILD_SETTINGS_FILE,
-    SPOTIFY_CLIENT_ID,
-    SPOTIFY_CLIENT_SECRET,
-    SPOTIFY_URL_REGEX,
-    NETEASE_URL_REGEX,
-    APPLE_MUSIC_URL_REGEX,
-    MEDIA_EXECUTOR,
-    HAS_WAVELINK,
-    wavelink,
-    load_guild_settings,
-    save_guild_setting,
-    get_guild_setting,
-    get_ffmpeg_options,
-    get_thread_ytdl,
     close_http_session
 )
-from core import (
-    Song,
-    GuildMusicState,
-    BufferedAudioSource,
-    is_vc_connected,
-    is_vc_playing,
-    is_vc_active,
-    is_vc_paused,
-    has_dj_permission,
-    get_playback_elapsed,
+from core.node import (
     MusicNodeBot,
-    NODE_BOTS,
-    check_lavalink_health,
-    play_next,
-    get_bot_guild,
-    get_or_fetch_bot_guild,
-    find_best_bot_for_channel,
-    get_bot_in_user_room,
-    get_user_voice_channel
-)
-from platforms import (
-    resolve_spotify,
-    resolve_netease,
-    resolve_apple_music,
-    extract_stream_url_sync,
-    extract_media_info,
-    find_autoplay_candidate
-)
-from ui import (
-    make_progress_bar,
-    get_platform_badge,
-    build_nowplaying_embed,
-    build_queue_embed,
-    build_song_queued_embed,
-    format_duration,
-    parse_time_str,
-    MusicControllerView,
-    SearchSelectView
-)
-from commands import (
-    register_slash_commands
+    NODE_BOTS
 )
 
 async def main():

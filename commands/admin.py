@@ -7,10 +7,9 @@ from discord import app_commands
 from config import (
     __version__,
     MEDIA_EXECUTOR,
-    save_guild_setting,
-    GUILD_LANGUAGES
+    save_guild_setting
 )
-from i18n import t
+from i18n import t, GUILD_LANGUAGES
 from lyrics import get_lyrics
 from core.models import (
     is_vc_connected,

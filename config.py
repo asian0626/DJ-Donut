@@ -1,5 +1,6 @@
 import os
 import sys
+import re
 import json
 import time
 import threading
@@ -27,10 +28,19 @@ class BotError(Exception):
 class AudioError(BotError):
     pass
 
-class StreamExtractionError(BotError):
+class AudioSourceError(AudioError):
+    pass
+
+class StreamExtractionError(AudioError):
+    pass
+
+class TrackNotFoundError(BotError):
     pass
 
 class VoiceConnectionError(BotError):
+    pass
+
+class PermissionDeniedError(BotError):
     pass
 
 try:
@@ -55,7 +65,9 @@ if not TOKENS:
         TOKENS.append((1, legacy.strip()))
 
 COOKIE_FILE = os.path.join(os.path.dirname(__file__), "cookies.txt")
+COOKIES_FILE = COOKIE_FILE
 SETTINGS_FILE = os.path.join(os.path.dirname(__file__), "guild_settings.json")
+GUILD_SETTINGS_FILE = SETTINGS_FILE
 _SETTINGS_LOCK = threading.Lock()
 
 BASSBOOST_PRESETS = {
@@ -76,8 +88,21 @@ EQ_PRESETS = {
     "vaporwave": {"label": "🌆 Vaporwave (降速蒸氣)", "ffmpeg": "asetrate=48000*0.85,aresample=48000,atempo=1.0"},
     "8d": {"label": "🎧 8D 空間環繞立體聲", "ffmpeg": "apulsator=hz=0.125"}
 }
+AUDIO_FILTER_PRESETS = EQ_PRESETS
 
 STREAM_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36'
+
+SPOTIFY_URL_REGEX = re.compile(
+    r'(?:https?://(?:open\.)?spotify\.com/(?:intl-[a-zA-Z-]+/)?|spotify:)(track|playlist|album|artist)[:/]([a-zA-Z0-9]+)'
+)
+NETEASE_URL_REGEX = re.compile(
+    r'(?:https?://)?(?:[a-zA-Z0-9-]+\.)?(?:music\.163\.com|163cn\.tv|163\.lu)/.*?(\b(?:song|playlist|album)\b).*?(?:id=|\/)(\d+)',
+    re.IGNORECASE
+)
+APPLE_MUSIC_URL_REGEX = re.compile(
+    r'(?:https?://)?music\.apple\.com/(?:([a-z]{2})/)?(album|playlist|song)/([^/?#]+)(?:/(\d+|pl\.[a-zA-Z0-9]+))?(?:\?.*?\bi=(\d+))?',
+    re.IGNORECASE
+)
 
 class YTDLNullLogger:
     def debug(self, msg): pass
@@ -213,6 +238,12 @@ def save_guild_setting(guild_id: int, key: str, value: Any):
                 json.dump(data, f, ensure_ascii=False, indent=2)
         except Exception:
             pass
+
+load_guild_settings = load_all_guild_settings
+
+def get_guild_setting(guild_id: int, key: str, default: Any = None) -> Any:
+    data = load_all_guild_settings()
+    return data.get(str(guild_id), {}).get(key, default)
 
 def parse_time_str(time_str: str) -> Optional[int]:
     time_str = time_str.strip()

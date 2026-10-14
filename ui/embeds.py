@@ -1,6 +1,12 @@
 import discord
 from typing import Optional, Tuple, Any
-from config import __version__, BASSBOOST_PRESETS, EQ_PRESETS, format_duration
+from config import (
+    __version__,
+    BASSBOOST_PRESETS,
+    EQ_PRESETS,
+    format_duration,
+    parse_time_str
+)
 from core.models import Song, GuildMusicState, get_playback_elapsed
 from i18n import t, resolve_locale
 
