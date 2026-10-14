@@ -2,7 +2,7 @@
 
 <div align="center">
 
-![Version](https://img.shields.io/badge/Version-v1.1.0-blue?logo=git)
+![Version](https://img.shields.io/badge/Version-v1.2.0-blue?logo=git)
 ![Python](https://img.shields.io/badge/Python-3.10%20%7C%203.11%20%7C%203.12-3776AB?logo=python&logoColor=white)
 ![Discord.py](https://img.shields.io/badge/Discord.py-v2.7.0%2B-5865F2?logo=discord&logoColor=white)
 ![Lavalink](https://img.shields.io/badge/Lavalink-v4.0%2B-FF3366?logo=audacity&logoColor=white)
@@ -59,16 +59,20 @@ You can invite the pre-hosted **DJ Donut** cluster directly to your server:
 | Command | Arguments | Description | 說明 (繁體中文) |
 | :--- | :--- | :--- | :--- |
 | **/help** | *None* | Interactive manual categorized by features | 查看現代化分類指令使用指南 |
-| **/play** | `query`, `[bot_id]` | Play a track or playlist (auto-dispatches an idle bot or targeted bot 1~5) | 點歌（自動分配空閒機器人，亦可指定 1～5 號） |
+| **/play** | `query`, `[bot_id]` | Play a track or playlist (auto-dispatches an idle bot or targeted bot 1~5) | 點歌（支援智慧歷史補全與自動分配） |
+| **/search** | `query` | Search tracks and pick from interactive top-5 select menu | 搜尋歌曲並從前 5 首下拉選單中挑選播放 |
 | **/seek** | `time` | Fast-forward or jump to a timestamp (e.g. `90` or `01:30`) | 精確跳轉當前歌曲播放進度 (支援秒數或分:秒) |
+| **/move** | `from`, `to` | Move a queued track to a new position | 調整待播清單中指定歌曲的播放順序 |
+| **/replay** | `[index]` | Replay a track from playback history | 一鍵重播歷史紀錄中的歌曲 (預設上一首) |
 | **/shuffle** | *None* | Randomly shuffle all upcoming songs in the queue | 隨機打亂當前語音房的待播歌單順序 |
 | **/remove** | `index` | Remove a specific track from the queue by its number | 移除待播清單中的指定序號歌曲 |
 | **/clear** | *None* | Clear all upcoming songs from the queue | 一鍵清空當前語音房所有的待播歌曲 |
 | **/history** | *None* | View the last 15 songs played in this room | 檢視最近播放過的歷史歌曲紀錄 |
 | **/nowplaying**| *None* | Show track details, progress bar, and interactive buttons | 查看目前歌曲、即時進度條與控制器 |
 | **/queue** | *None* | Show the upcoming track queue for your room | 查看你所在語音房的待播歌單隊列 |
-| **/skip** | *None* | Skip the track currently playing in your room | 跳過你當前語音房的歌曲 |
+| **/skip** | *None* | Skip the track currently playing in your room (DJ guarded) | 跳過你當前語音房的歌曲 (支援 DJ 權限) |
 | **/stop** | `[force_all]` | Stop playback and disconnect the bot (or stop all bots) | 停止播放並退出語音房（或強制全部退出） |
+| **/dj** | `[role]`, `[clear]` | Manage or view server DJ permission role | 設定、檢視或清除本伺服器 DJ 管理身分組 |
 | **/autoplay** | *None* | Toggle smart autoplay radio mode when queue ends | 切換自動接歌模式 (歌單結束自動接續播放) |
 | **/lyrics** | `[song]` | Look up synced or plain lyrics for current or queried track | 查詢當前或指定歌曲的動態/純文字歌詞 |
 | **/bassboost** | `level` | Adjust bass boost (+4dB to +20dB) | 調整重低音增強強度 |
@@ -196,6 +200,15 @@ flowchart TD
 ---
 
 ## Changelog
+
+### v1.2.0 (2026-10-15)
+- **Interactive Search Menu**: Added `/search <query>` allowing users to search YouTube and pick tracks from an interactive Discord UI drop-down menu showing title, duration, and artist.
+- **Queue Reordering**: Added `/move <from> <to>` to freely reposition songs inside the upcoming queue without restarting playback.
+- **History Replay**: Added `/replay [index]` to quickly re-queue songs directly from room history.
+- **DJ Permission Roles**: Added `/dj [role] [clear]` to configure dedicated DJ roles. When set, only DJs and server administrators can skip, stop, or clear the queue in shared rooms.
+- **Smart Query Autocomplete**: Added autocomplete suggestions to `/play` with listening history matches and popular genre queries.
+- **Memory & Resource Reclamation**: Implemented a 10-minute periodic task to automatically garbage-collect idle room states (> 30 mins) and added a 5-minute timeout to player views.
+- **Playlist Stream Stability**: Resolved audio thread deadlocks and aligned User-Agent headers across yt-dlp and FFmpeg to prevent runaway skipping on long playlists.
 
 ### v1.1.0 (2026-10-15)
 - **Dedicated Media Worker Pool**: Offloaded Spotify, NetEase, Apple Music, and yt-dlp metadata extraction to a 10-worker `ThreadPoolExecutor`, preventing the main asyncio event loop from stalling during heavy track resolution.

@@ -24,7 +24,7 @@ from lyrics import get_lyrics
 
 load_dotenv()
 
-__version__ = "1.1.0"
+__version__ = "1.2.0"
 
 try:
     import wavelink
@@ -321,6 +321,7 @@ class GuildMusicState:
         self.pause_timestamp: float = 0.0
         self.consecutive_failures: int = 0
         self.is_seeking: bool = False
+        self.dj_role_id: Optional[int] = None
         self.current_view: Optional[discord.ui.View] = None
         self.last_active: float = time.time()
         self.load_persisted_settings()
@@ -339,6 +340,8 @@ class GuildMusicState:
             self.filter = data["filter"]
         if "autoplay" in data:
             self.autoplay = bool(data["autoplay"])
+        if "dj_role_id" in data:
+            self.dj_role_id = int(data["dj_role_id"]) if data["dj_role_id"] else None
 
 def _extract_media_info(data: Optional[dict]) -> Tuple[Optional[str], Optional[str], int]:
     if not data:
@@ -1276,6 +1279,20 @@ async def safe_disconnect(vc):
     except Exception as e:
         print(f"[Safe Disconnect Error] {e}")
 
+def has_dj_permission(interaction: discord.Interaction, state: 'GuildMusicState') -> bool:
+    if not state.dj_role_id:
+        return True
+    if hasattr(interaction.user, 'guild_permissions') and interaction.user.guild_permissions.administrator:
+        return True
+    if hasattr(interaction.user, 'roles') and any(r.id == state.dj_role_id for r in interaction.user.roles):
+        return True
+    vc = interaction.guild.voice_client if interaction.guild else None
+    if vc and hasattr(vc, 'channel') and vc.channel:
+        human_members = [m for m in vc.channel.members if not m.bot]
+        if len(human_members) <= 1:
+            return True
+    return False
+
 def get_playback_elapsed(state: GuildMusicState) -> int:
     if not state.current or state.start_time == 0:
         return 0
@@ -1313,10 +1330,16 @@ def get_platform_badge(url: str, uploader: str) -> Tuple[str, int]:
 
 class MusicControllerView(discord.ui.View):
     def __init__(self, bot: 'MusicNodeBot', state: GuildMusicState):
-        super().__init__(timeout=None)
+        super().__init__(timeout=300)
         self.bot = bot
         self.state = state
         self._update_button_states()
+
+    async def on_timeout(self):
+        for child in self.children:
+            if hasattr(child, 'disabled'):
+                child.disabled = True
+        self.stop()
 
     def _update_button_states(self):
         for child in self.children:
@@ -1359,6 +1382,9 @@ class MusicControllerView(discord.ui.View):
 
     @discord.ui.button(emoji="⏭️", style=discord.ButtonStyle.secondary, row=0, custom_id="music_skip")
     async def skip(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not has_dj_permission(interaction, self.state):
+            await interaction.response.send_message(f"❌ 此操作目前僅限擁有 DJ 身分組 <@&{self.state.dj_role_id}> 或管理員使用！", ephemeral=True)
+            return
         vc = interaction.guild.voice_client
         if not vc:
             await interaction.response.send_message(t('not_playing', interaction), ephemeral=True)
@@ -1379,6 +1405,9 @@ class MusicControllerView(discord.ui.View):
 
     @discord.ui.button(emoji="⏹️", style=discord.ButtonStyle.danger, row=0, custom_id="music_stop")
     async def stop(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not has_dj_permission(interaction, self.state):
+            await interaction.response.send_message(f"❌ 此操作目前僅限擁有 DJ 身分組 <@&{self.state.dj_role_id}> 或管理員使用！", ephemeral=True)
+            return
         vc = interaction.guild.voice_client
         self.state.queue.clear()
         self.state.current = None
@@ -1450,6 +1479,89 @@ class MusicControllerView(discord.ui.View):
     async def view_queue(self, interaction: discord.Interaction, button: discord.ui.Button):
         embed = build_queue_embed(self.bot, self.state, lang=resolve_locale(interaction))
         await interaction.response.send_message(embed=embed, ephemeral=True)
+
+class SearchSelectView(discord.ui.View):
+    def __init__(self, bot: 'MusicNodeBot', guild: discord.Guild, user: discord.Member, results: list):
+        super().__init__(timeout=60)
+        self.bot = bot
+        self.guild = guild
+        self.user = user
+        self.results = results
+
+        options = []
+        for i, item in enumerate(results[:5]):
+            title = item.get('title', '未知歌曲')[:90]
+            dur = format_duration(item.get('duration', 0))
+            uploader = item.get('uploader', '未知上傳者')[:30]
+            options.append(discord.SelectOption(
+                label=f"{i+1}. {title}",
+                value=str(i),
+                description=f"時長: {dur} | 上傳者: {uploader}"[:100]
+            ))
+
+        self.select_menu = discord.ui.Select(
+            placeholder="請點選此處挑選欲播放的歌曲...",
+            min_values=1,
+            max_values=1,
+            options=options
+        )
+        self.select_menu.callback = self.on_select
+        self.add_item(self.select_menu)
+
+    async def on_select(self, interaction: discord.Interaction):
+        if interaction.user.id != self.user.id:
+            await interaction.response.send_message("❌ 只有發起搜尋的人才能選擇歌曲！", ephemeral=True)
+            return
+
+        idx = int(self.select_menu.values[0])
+        item = self.results[idx]
+        title = item.get('title', '未知歌曲')
+        vid = item.get('id')
+        song_url = item.get('webpage_url')
+        if not song_url and vid:
+            song_url = f"https://www.youtube.com/watch?v={vid}"
+        elif not song_url:
+            raw_url = item.get('url', '')
+            song_url = raw_url if raw_url.startswith('http') else (f"https://www.youtube.com/watch?v={vid}" if vid else title)
+
+        song = Song({
+            'id': vid,
+            'title': title,
+            'webpage_url': song_url,
+            'url': song_url,
+            'duration': item.get('duration', 0),
+            'thumbnail': item.get('thumbnail', ''),
+            'uploader': item.get('uploader', '未知上傳者')
+        }, interaction.user)
+
+        state = self.bot.get_state(self.guild.id)
+        state.text_channel = interaction.channel
+        state.queue.append(song)
+
+        self.select_menu.disabled = True
+        embed = discord.Embed(
+            title=f"✅ 【{self.bot.node_name}】已成功選擇並加入待播隊列！",
+            description=f"**[{song.title}]({song.url})**",
+            color=0x2ECC71
+        )
+        embed.add_field(name="⏱️ 時長", value=f"`{format_duration(song.duration)}`", inline=True)
+        embed.add_field(name="📍 隊列位置", value=f"`第 {len(state.queue)} 位`", inline=True)
+        embed.add_field(name="👤 點播者", value=interaction.user.mention, inline=True)
+        if song.thumbnail:
+            embed.set_thumbnail(url=song.thumbnail)
+
+        await interaction.response.edit_message(embed=embed, view=self)
+        self.stop()
+
+        bot_guild = get_bot_guild(self.bot, self.guild.id, interaction.guild) or self.guild
+        vc = (bot_guild.voice_client if bot_guild else None) or discord.utils.get(getattr(self.bot, 'voice_clients', []), guild__id=self.guild.id)
+        if not is_vc_active(vc):
+            await play_next(self.bot, bot_guild)
+
+    async def on_timeout(self):
+        for item in self.children:
+            item.disabled = True
+        self.stop()
 
 def build_nowplaying_embed(bot: 'MusicNodeBot', song: Song, state: GuildMusicState, lang: Optional[str] = None) -> discord.Embed:
     guild_lang = lang or resolve_locale(guild_id=state.guild_id)
@@ -1665,6 +1777,26 @@ class MusicNodeBot(commands.Bot):
             state.is_playing = False
             return
 
+    async def _periodic_state_cleanup(self):
+        await self.wait_until_ready()
+        while not self.is_closed():
+            await asyncio.sleep(600)
+            now = time.time()
+            to_remove = []
+            for gid, st in list(self.states.items()):
+                if not st.is_playing and len(st.queue) == 0 and (now - st.last_active > 1800):
+                    bg = self.get_guild(gid)
+                    vc = bg.voice_client if bg else None
+                    if not vc or not is_vc_connected(vc):
+                        if st.current_view:
+                            try:
+                                st.current_view.stop()
+                            except Exception:
+                                pass
+                        to_remove.append(gid)
+            for gid in to_remove:
+                self.states.pop(gid, None)
+
     async def on_ready(self):
         engine_str = "⚡ Lavalink v4 (Opus Passthrough)" if self.lavalink_connected else "🔥 極限原生獨立引擎 (384k VBR)"
         print(f"✅ 【{self.node_name}】已成功連線！名稱: {self.user.name} (音訊引擎: {engine_str})")
@@ -1673,6 +1805,9 @@ class MusicNodeBot(commands.Bot):
             name=f"音樂派對 | {self.node_name} 待命中"
         )
         await self.change_presence(status=discord.Status.online, activity=activity)
+        if not hasattr(self, '_cleanup_task_started'):
+            self._cleanup_task_started = True
+            self.loop.create_task(self._periodic_state_cleanup())
 def _fetch_autoplay_sync(last_title: str) -> Optional[dict]:
     try:
         clean_title = re.sub(r'[\(\[\{].*?[\)\]\}]', '', last_title).strip()
@@ -2419,6 +2554,36 @@ def register_slash_commands(primary_bot: commands.Bot):
                 await interaction.followup.send(t('song_started', interaction, title=song.title, bot_name=selected_bot.node_name))
             await play_next(selected_bot, bot_guild)
 
+    @slash_play.autocomplete("查詢")
+    async def slash_play_autocomplete(interaction: discord.Interaction, current: str) -> List[app_commands.Choice[str]]:
+        state = None
+        if NODE_BOTS and interaction.guild_id:
+            state = NODE_BOTS[0].get_state(interaction.guild_id)
+
+        choices = []
+        if state and state.history:
+            seen = set()
+            for song in state.history:
+                if song.title and song.title not in seen:
+                    seen.add(song.title)
+                    if not current or current.lower() in song.title.lower():
+                        choices.append(app_commands.Choice(name=f"🕒 {song.title[:95]}", value=song.title[:100]))
+                        if len(choices) >= 5:
+                            break
+
+        if not current and not choices:
+            default_suggestions = [
+                "周杰倫 經典熱門歌曲",
+                "Lofi Hip Hop chill beats",
+                "Trending Pop Music 2026",
+                "華語流行音樂排行榜",
+                "Billboard Hot 100"
+            ]
+            for s in default_suggestions:
+                choices.append(app_commands.Choice(name=f"🔥 {s}", value=s))
+
+        return choices[:10]
+
     @tree.command(name="status", description="查看所有音樂機器人的即時連線、分流與伺服器進駐狀態儀表板")
     async def slash_status(interaction: discord.Interaction):
         guild_id = interaction.guild_id
@@ -2503,27 +2668,31 @@ def register_slash_commands(primary_bot: commands.Bot):
         )
         embed.add_field(
             name="🎵 音樂播放指令",
-            value="> `/play <查詢>` — 智慧點歌（自動派發空閒機器人進房）\n"
+            value="> `/play <查詢>` — 智慧點歌（支援歷史搜尋自動補全）\n"
+                  "> `/search <關鍵字>` — 搜尋歌曲並由下拉選單精準挑選\n"
                   "> `/nowplaying` — 開啟進度條與全功能互動控制器\n"
                   "> `/queue` — 檢視當前語音房的待播歌單隊列\n"
-                  "> `/skip` — 跳過當前歌曲\n"
+                  "> `/skip` — 跳過當前歌曲 (支援 DJ 權限)\n"
                   "> `/stop` — 停止播放並讓機器人退出語音房",
             inline=False
         )
         embed.add_field(
-            name="📻 電台與進階模式",
-            value="> `/autoplay` — 開啟/關閉智慧自動接歌電台模式\n"
-                  "> `/lyrics [歌曲]` — 查詢即時動態時間軸歌詞與純文字歌詞\n"
-                  "> `/247` — 切換 24/7 永久常駐語音房模式",
-            inline=False
-        )
-        embed.add_field(
             name="📑 隊列進階管理",
-            value="> `/seek <時間>` — 精確跳轉當前歌曲播放進度 (如: 90 或 01:30)\n"
+            value="> `/move <來源> <目標>` — 自由調整隊列歌曲播放順序\n"
+                  "> `/seek <時間>` — 精確跳轉當前歌曲播放進度 (如: 90 或 01:30)\n"
                   "> `/shuffle` — 隨機打亂當前語音房的待播歌單隊列\n"
                   "> `/remove <編號>` — 移除待播清單中的指定序號歌曲\n"
                   "> `/clear` — 一鍵清空當前語音房所有的待播歌曲\n"
-                  "> `/history` — 檢視最近播放的 15 首歷史歌曲紀錄",
+                  "> `/history` — 檢視最近播放的 15 首歷史歌曲紀錄\n"
+                  "> `/replay [序號]` — 一鍵重新點播歷史紀錄中的歌曲",
+            inline=False
+        )
+        embed.add_field(
+            name="🛡️ 權限與進階設定",
+            value="> `/dj [身分組]` — 設定、檢視或清除本伺服器 DJ 控制權限\n"
+                  "> `/autoplay` — 開啟/關閉智慧自動接歌電台模式\n"
+                  "> `/lyrics [歌曲]` — 查詢即時動態時間軸歌詞與純文字歌詞\n"
+                  "> `/247` — 切換 24/7 永久常駐語音房模式",
             inline=False
         )
         embed.add_field(
@@ -2556,6 +2725,10 @@ def register_slash_commands(primary_bot: commands.Bot):
             return
 
         state = b.get_state(interaction.guild_id)
+        if not has_dj_permission(interaction, state):
+            await interaction.response.send_message(f"❌ 該指令目前僅限擁有 DJ 身分組 <@&{state.dj_role_id}> 或管理員使用！", ephemeral=True)
+            return
+
         bot_guild = get_bot_guild(b, interaction.guild_id, interaction.guild) or interaction.guild
         vc = (bot_guild.voice_client if bot_guild else None) or discord.utils.get(getattr(b, 'voice_clients', []), guild__id=interaction.guild_id)
         if vc and is_vc_active(vc):
@@ -2571,6 +2744,9 @@ def register_slash_commands(primary_bot: commands.Bot):
     async def slash_stop(interaction: discord.Interaction, 全部退出: bool = False):
         guild_id = interaction.guild_id
         if 全部退出:
+            if not (hasattr(interaction.user, 'guild_permissions') and interaction.user.guild_permissions.administrator):
+                await interaction.response.send_message("❌ 強制全體退出指令僅限伺服器管理員使用！", ephemeral=True)
+                return
             stopped_names = []
             for b in NODE_BOTS:
                 bg = get_bot_guild(b, guild_id, interaction.guild)
@@ -2602,6 +2778,10 @@ def register_slash_commands(primary_bot: commands.Bot):
             return
 
         state = b.get_state(interaction.guild_id)
+        if not has_dj_permission(interaction, state):
+            await interaction.response.send_message(f"❌ 該指令目前僅限擁有 DJ 身分組 <@&{state.dj_role_id}> 或管理員使用！", ephemeral=True)
+            return
+
         state.loop_mode = 'off'
         state.current = None
         state.queue.clear()
@@ -2769,6 +2949,10 @@ def register_slash_commands(primary_bot: commands.Bot):
             return
 
         state = b.get_state(interaction.guild_id)
+        if not has_dj_permission(interaction, state):
+            await interaction.response.send_message(f"❌ 該指令目前僅限擁有 DJ 身分組 <@&{state.dj_role_id}> 或管理員使用！", ephemeral=True)
+            return
+
         if not state.queue:
             await interaction.response.send_message("❌ 待播隊列目前為空！", ephemeral=True)
             return
@@ -2795,6 +2979,10 @@ def register_slash_commands(primary_bot: commands.Bot):
             return
 
         state = b.get_state(interaction.guild_id)
+        if not has_dj_permission(interaction, state):
+            await interaction.response.send_message(f"❌ 該指令目前僅限擁有 DJ 身分組 <@&{state.dj_role_id}> 或管理員使用！", ephemeral=True)
+            return
+
         count = len(state.queue)
         if count == 0:
             await interaction.response.send_message("❌ 待播隊列原本就是空的！", ephemeral=True)
@@ -2802,6 +2990,202 @@ def register_slash_commands(primary_bot: commands.Bot):
 
         state.queue.clear()
         await interaction.response.send_message(f"🧹 已清空待播隊列中所有的 **{count}** 首歌曲！")
+
+    @tree.command(name="move", description="調整待播清單中指定歌曲的播放順序 (Move song position in queue)")
+    @app_commands.describe(來源序號="要移動的歌曲在待播清單中的序號", 目標序號="要移至的新序號位置")
+    async def slash_move(interaction: discord.Interaction, 來源序號: int, 目標序號: int):
+        voice_channel = await get_user_voice_channel(interaction)
+        if not voice_channel:
+            await interaction.response.send_message(t('must_join_voice', interaction), ephemeral=True)
+            return
+
+        b = get_bot_in_user_room(interaction.guild_id, voice_channel, interaction.guild)
+        if not b:
+            await interaction.response.send_message(t('no_bot_in_room', interaction), ephemeral=True)
+            return
+
+        state = b.get_state(interaction.guild_id)
+        if not has_dj_permission(interaction, state):
+            await interaction.response.send_message(f"❌ 該指令目前僅限擁有 DJ 身分組 <@&{state.dj_role_id}> 或管理員使用！", ephemeral=True)
+            return
+
+        q_len = len(state.queue)
+        if q_len == 0:
+            await interaction.response.send_message("❌ 待播清單為空，無法調整順序！", ephemeral=True)
+            return
+
+        if 來源序號 < 1 or 來源序號 > q_len:
+            await interaction.response.send_message(f"❌ 無效的來源序號！請輸入 1 至 {q_len} 之間的數值。", ephemeral=True)
+            return
+
+        if 目標序號 < 1 or 目標序號 > q_len:
+            await interaction.response.send_message(f"❌ 無效的目標序號！請輸入 1 至 {q_len} 之間的數值。", ephemeral=True)
+            return
+
+        if 來源序號 == 目標序號:
+            await interaction.response.send_message("⚠️ 來源序號與目標序號相同，順序未更動。", ephemeral=True)
+            return
+
+        queue_list = list(state.queue)
+        target_song = queue_list.pop(來源序號 - 1)
+        queue_list.insert(目標序號 - 1, target_song)
+        state.queue = deque(queue_list)
+
+        embed = discord.Embed(
+            title="🔀 隊列順序調整成功！",
+            description=f"已將第 **{來源序號}** 首 **[{target_song.title}]({target_song.url})** 移動至第 **{目標序號}** 順位！",
+            color=0x3498DB
+        )
+        await interaction.response.send_message(embed=embed)
+
+    @tree.command(name="replay", description="重播歷史紀錄中的歌曲 (Replay a song from history)")
+    @app_commands.describe(序號="歷史紀錄中的歌曲序號 (預設為 1，即上一首)")
+    async def slash_replay(interaction: discord.Interaction, 序號: int = 1):
+        voice_channel = await get_user_voice_channel(interaction)
+        if not voice_channel:
+            await interaction.response.send_message(t('must_join_voice', interaction), ephemeral=True)
+            return
+
+        selected_bot, is_new_join = await find_best_bot_for_channel(interaction.guild_id, voice_channel, interaction.guild)
+        if not selected_bot:
+            await interaction.response.send_message(t('no_bot_available', interaction), ephemeral=True)
+            return
+
+        state = selected_bot.get_state(interaction.guild_id)
+        bot_guild = get_bot_guild(selected_bot, interaction.guild_id, interaction.guild) or interaction.guild
+        vc = (bot_guild.voice_client if bot_guild else None) or discord.utils.get(getattr(selected_bot, 'voice_clients', []), guild__id=interaction.guild_id)
+
+        if not state.history:
+            await interaction.response.send_message("❌ 本房間目前沒有任何歷史播放紀錄！", ephemeral=True)
+            return
+
+        h_len = len(state.history)
+        if 序號 < 1 or 序號 > h_len:
+            await interaction.response.send_message(f"❌ 無效的歷史序號！請輸入 1 至 {h_len} 之間的數值。", ephemeral=True)
+            return
+
+        history_song = state.history[序號 - 1]
+        new_song = Song(history_song.data, requester=interaction.user, wavelink_track=history_song.wavelink_track)
+        new_song.stream_url = history_song.stream_url
+        new_song.duration = history_song.duration
+        new_song.thumbnail = history_song.thumbnail
+
+        if is_new_join or not vc or not is_vc_connected(vc):
+            try:
+                vc = await voice_channel.connect(reconnect=True, timeout=20.0, self_deaf=True)
+            except Exception as e:
+                await interaction.response.send_message(t('connect_failed', interaction, bot_name=selected_bot.node_name, error=str(e)), ephemeral=True)
+                return
+
+        state.text_channel = interaction.channel
+        state.queue.append(new_song)
+
+        embed = discord.Embed(
+            title=f"🔄 【{selected_bot.node_name}】重新加入播放隊列！",
+            description=f"**[{new_song.title}]({new_song.url})**",
+            color=0x2ECC71
+        )
+        embed.add_field(name="⏱️ 時長", value=f"`{format_duration(new_song.duration)}`", inline=True)
+        embed.add_field(name="👤 點播者", value=interaction.user.mention, inline=True)
+        embed.add_field(name="📍 隊列位置", value=f"`第 {len(state.queue)} 位`", inline=True)
+        if new_song.thumbnail:
+            embed.set_thumbnail(url=new_song.thumbnail)
+        await interaction.response.send_message(embed=embed)
+
+        if not is_vc_active(vc):
+            await play_next(selected_bot, bot_guild)
+
+    @tree.command(name="search", description="搜尋歌曲並從前 5 個結果中挑選播放 (Search & pick from top 5)")
+    @app_commands.describe(關鍵字="要搜尋的歌曲名稱或歌手")
+    async def slash_search(interaction: discord.Interaction, 關鍵字: str):
+        voice_channel = await get_user_voice_channel(interaction)
+        if not voice_channel:
+            await interaction.response.send_message(t('must_join_voice', interaction), ephemeral=True)
+            return
+
+        await interaction.response.defer()
+        selected_bot, is_new_join = await find_best_bot_for_channel(interaction.guild_id, voice_channel, interaction.guild)
+        if not selected_bot:
+            await interaction.followup.send(t('no_bot_available', interaction))
+            return
+
+        bot_guild = get_bot_guild(selected_bot, interaction.guild_id, interaction.guild) or interaction.guild
+        vc = (bot_guild.voice_client if bot_guild else None) or discord.utils.get(getattr(selected_bot, 'voice_clients', []), guild__id=interaction.guild_id)
+
+        if is_new_join or not vc or not is_vc_connected(vc):
+            try:
+                vc = await voice_channel.connect(reconnect=True, timeout=20.0, self_deaf=True)
+            except Exception as e:
+                await interaction.followup.send(t('connect_failed', interaction, bot_name=selected_bot.node_name, error=str(e)))
+                return
+
+        loop = asyncio.get_event_loop()
+        query = f"ytsearch5:{關鍵字}"
+        try:
+            data = await loop.run_in_executor(
+                MEDIA_EXECUTOR, lambda: get_thread_ytdl(extract_flat=True, noplaylist=True).extract_info(query, download=False)
+            )
+        except Exception as e:
+            await interaction.followup.send(f"❌ 搜尋失敗: `{e}`")
+            return
+
+        entries = [e for e in (data.get('entries', []) if data else []) if e and e.get('title')][:5]
+        if not entries:
+            await interaction.followup.send(f"❌ 找不到與 `{關鍵字}` 相關的搜尋結果！")
+            return
+
+        embed = discord.Embed(
+            title=f"🔍 【{selected_bot.node_name}】搜尋結果 — 請選擇歌曲",
+            description=f"關鍵字：`{關鍵字}`\n請於下方選單點選您欲點播的歌曲：",
+            color=0x5865F2
+        )
+        for i, item in enumerate(entries):
+            dur = format_duration(item.get('duration', 0))
+            embed.add_field(
+                name=f"{i+1}. {item.get('title', '未知')[:60]}",
+                value=f"⏱️ 時長: `{dur}` | 👤 上傳者: `{item.get('uploader', '未知')[:30]}`",
+                inline=False
+            )
+
+        view = SearchSelectView(selected_bot, bot_guild, interaction.user, entries)
+        await interaction.followup.send(embed=embed, view=view)
+
+    @tree.command(name="dj", description="設定、檢視或清除本伺服器的 DJ 管理身分組 (Set or manage DJ role)")
+    @app_commands.describe(身分組="要指定為 DJ 的身分組 (留空為檢視當前設定)", 清除="是否清除 DJ 身分組限制")
+    async def slash_dj(interaction: discord.Interaction, 身分組: Optional[discord.Role] = None, 清除: bool = False):
+        if not interaction.guild:
+            await interaction.response.send_message("❌ 此指令僅限在伺服器中使用！", ephemeral=True)
+            return
+
+        state = NODE_BOTS[0].get_state(interaction.guild_id) if NODE_BOTS else None
+        if not state:
+            await interaction.response.send_message("❌ 機器人狀態未就緒！", ephemeral=True)
+            return
+
+        if 清除:
+            if not interaction.user.guild_permissions.administrator:
+                await interaction.response.send_message("❌ 僅有伺服器管理員可清除 DJ 身分組設定！", ephemeral=True)
+                return
+            for b in NODE_BOTS:
+                b.get_state(interaction.guild_id).dj_role_id = None
+            save_guild_setting(interaction.guild_id, "dj_role_id", None)
+            await interaction.response.send_message("🎧 已清除本伺服器的 DJ 身分組限制，所有成員皆可控制播放！")
+            return
+
+        if 身分組:
+            if not interaction.user.guild_permissions.administrator:
+                await interaction.response.send_message("❌ 僅有伺服器管理員可設定 DJ 身分組！", ephemeral=True)
+                return
+            for b in NODE_BOTS:
+                b.get_state(interaction.guild_id).dj_role_id = 身分組.id
+            save_guild_setting(interaction.guild_id, "dj_role_id", 身分組.id)
+            await interaction.response.send_message(f"🎧 成功將本伺服器的 DJ 角色設定為 {身分組.mention}！\n非 DJ 成員在多人聆聽時將無法擅自切歌或清空隊列。")
+            return
+
+        if state.dj_role_id:
+            await interaction.response.send_message(f"🎧 當前伺服器設定的 DJ 身分組為：<@&{state.dj_role_id}>\n若要更改請使用 `/dj 身分組: @角色`，若要解除限制請使用 `/dj 清除: 是`。")
+        else:
+            await interaction.response.send_message("🎧 本伺服器目前**未設定** DJ 身分組限制（所有成員皆可自由切歌與操作）。\n管理員可透過 `/dj 身分組: @角色` 啟用 DJ 控制權限。")
 
     @tree.command(name="history", description="檢視當前語音房最近播放過的歷史歌曲紀錄")
     async def slash_history(interaction: discord.Interaction):
@@ -2855,7 +3239,13 @@ def register_slash_commands(primary_bot: commands.Bot):
             return
 
         embed = build_nowplaying_embed(b, state.current, state, lang=resolve_locale(interaction))
+        if state.current_view:
+            try:
+                state.current_view.stop()
+            except Exception:
+                pass
         view = MusicControllerView(b, state)
+        state.current_view = view
         await interaction.response.send_message(embed=embed, view=view)
 
     @tree.command(name="bitrate", description="查看或一鍵將當前語音房提升至伺服器最高音質位元率 (96k ~ 384k)")
