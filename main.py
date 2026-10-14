@@ -69,6 +69,8 @@ EQ_PRESETS = {
     "8d": {"label": "🎧 8D 空間環繞立體聲", "ffmpeg": "apulsator=hz=0.125"}
 }
 
+STREAM_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36'
+
 class YTDLNullLogger:
     def debug(self, msg): pass
     def info(self, msg): pass
@@ -92,12 +94,14 @@ def get_ytdl_opts(extract_flat: bool = False, noplaylist: bool = True) -> dict:
         'socket_timeout': 15,
         'extractor_args': {
             'youtube': {
-                'player_client': ['ios', 'web', 'mweb'],
+                'player_client': ['web', 'mweb'],
                 'skip': ['hls']
             }
         },
         'http_headers': {
-            'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1'
+            'User-Agent': STREAM_USER_AGENT,
+            'Accept': '*/*',
+            'Accept-Language': 'en-US,en;q=0.9'
         }
     }
     if extract_flat:
@@ -179,7 +183,7 @@ def parse_time_str(time_str: str) -> Optional[int]:
 def get_ffmpeg_options(state: 'GuildMusicState', seek_seconds: Optional[int] = None) -> dict:
     before_parts = [
         '-nostats -loglevel fatal',
-        '-headers "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36\r\nAccept: */*\r\n"',
+        f'-headers "User-Agent: {STREAM_USER_AGENT}\r\nAccept: */*\r\nAccept-Language: en-US,en;q=0.9\r\n"',
         '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -reconnect_on_network_error 1 -reconnect_on_http_error 4xx,5xx',
         '-probesize 64k -analyzeduration 500000'
     ]
@@ -278,8 +282,17 @@ class Song:
     def __init__(self, data: dict, requester: discord.Member, wavelink_track=None):
         self.data = data
         self.title = data.get('title', '未知標題')
-        self.url = data.get('webpage_url') or data.get('url', '')
-        self.stream_url = data.get('url', '')
+        raw_url = data.get('webpage_url') or data.get('url', '')
+        vid = data.get('id')
+        if raw_url and raw_url.startswith('http'):
+            self.url = raw_url
+        elif vid:
+            self.url = f"https://www.youtube.com/watch?v={vid}"
+        elif raw_url:
+            self.url = f"https://www.youtube.com/watch?v={raw_url}"
+        else:
+            self.url = ''
+        self.stream_url = data.get('url', '') if (data.get('url', '').startswith('http') and 'googlevideo.com' in data.get('url', '')) else ''
         self.duration = data.get('duration', 0)
         self.thumbnail = data.get('thumbnail', '')
         self.uploader = data.get('uploader', '未知上傳者')
@@ -1841,7 +1854,7 @@ async def play_next(bot: MusicNodeBot, guild: discord.Guild):
     try:
         ffmpeg_opts = get_ffmpeg_options(state)
         source = discord.FFmpegPCMAudio(stream_url, stderr=subprocess.DEVNULL, **ffmpeg_opts)
-        buffered_source = BufferedAudioSource(source, prefetch_frames=50, max_frames=250)
+        buffered_source = BufferedAudioSource(source, prefetch_frames=50, max_frames=500)
         audio_source = discord.PCMVolumeTransformer(buffered_source, volume=state.volume)
 
         def after_callback(error):
@@ -1849,11 +1862,7 @@ async def play_next(bot: MusicNodeBot, guild: discord.Guild):
                 return
             if error:
                 print(f"[{bot.node_name} Player Error] {error}")
-            fut = asyncio.run_coroutine_threadsafe(play_next(bot, guild), bot.loop)
-            try:
-                fut.result()
-            except Exception as e:
-                print(f"[{bot.node_name} Player Next Error] {e}")
+            asyncio.run_coroutine_threadsafe(play_next(bot, guild), bot.loop)
 
         if not vc or not is_vc_connected(vc):
             print(f"[{bot.node_name}] 語音客戶端未連線，無法播放")
@@ -1876,6 +1885,10 @@ async def play_next(bot: MusicNodeBot, guild: discord.Guild):
                         except Exception:
                             pass
 
+        if is_vc_playing(vc) or is_vc_paused(vc):
+            await safe_stop(vc)
+            await asyncio.sleep(0.05)
+
         if hasattr(vc, 'play'):
             if asyncio.iscoroutinefunction(vc.play):
                 print(f"[{bot.node_name}] 警告: vc 為非同步 Player，無法使用原生音源播放")
@@ -1895,6 +1908,17 @@ async def play_next(bot: MusicNodeBot, guild: discord.Guild):
 
     except Exception as e:
         print(f"[{bot.node_name} Play Error] 播放失敗: {e}")
+        state.consecutive_failures += 1
+        if state.consecutive_failures >= 5:
+            state.is_playing = False
+            state.current = None
+            if state.text_channel:
+                try:
+                    await state.text_channel.send("⚠️ 檢測到連續播放異常，已自動暫停播放以防止循環異常。")
+                except Exception:
+                    pass
+            return
+        await asyncio.sleep(0.5)
         await play_next(bot, guild)
 
 
@@ -2321,9 +2345,24 @@ def register_slash_commands(primary_bot: commands.Bot):
                 title = e.get('title', '未知歌曲')
                 if title in ['[Deleted video]', '[Private video]']:
                     continue
-                song_url = e.get('webpage_url') or e.get('url') or f"https://www.youtube.com/watch?v={e.get('id')}"
+                vid = e.get('id')
+                song_url = e.get('webpage_url')
+                if not song_url and vid:
+                    song_url = f"https://www.youtube.com/watch?v={vid}"
+                elif not song_url:
+                    raw_url = e.get('url', '')
+                    if raw_url.startswith('http'):
+                        song_url = raw_url
+                    elif vid:
+                        song_url = f"https://www.youtube.com/watch?v={vid}"
+                    elif raw_url:
+                        song_url = f"https://www.youtube.com/watch?v={raw_url}"
+                    else:
+                        song_url = title
                 song = Song({
+                    'id': vid,
                     'title': title,
+                    'webpage_url': song_url,
                     'url': song_url,
                     'duration': e.get('duration', 0),
                     'thumbnail': e.get('thumbnail', '')
@@ -2662,11 +2701,7 @@ def register_slash_commands(primary_bot: commands.Bot):
                     return
                 if error:
                     print(f"[{b.node_name} Player Error] {error}")
-                fut = asyncio.run_coroutine_threadsafe(play_next(b, bot_guild), b.loop)
-                try:
-                    fut.result()
-                except Exception as e:
-                    print(f"[{b.node_name} Player Next Error] {e}")
+                asyncio.run_coroutine_threadsafe(play_next(b, bot_guild), b.loop)
 
             if hasattr(vc, 'channel') and vc.channel and hasattr(vc.channel, 'bitrate') and vc.channel.bitrate:
                 target_bps = min(384000, max(64000, vc.channel.bitrate))
@@ -2683,6 +2718,10 @@ def register_slash_commands(primary_bot: commands.Bot):
                                 enc.bitrate = target_bps
                             except Exception:
                                 pass
+
+            if is_vc_playing(vc) or is_vc_paused(vc):
+                await safe_stop(vc)
+                await asyncio.sleep(0.05)
 
             vc.play(audio_source, after=after_callback)
             state.start_time = time.time() - target_sec
