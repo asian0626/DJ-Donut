@@ -2,6 +2,7 @@
 
 <div align="center">
 
+![Version](https://img.shields.io/badge/Version-v1.0.2-blue?logo=git)
 ![Python](https://img.shields.io/badge/Python-3.10%20%7C%203.11%20%7C%203.12-3776AB?logo=python&logoColor=white)
 ![Discord.py](https://img.shields.io/badge/Discord.py-v2.7.0%2B-5865F2?logo=discord&logoColor=white)
 ![Lavalink](https://img.shields.io/badge/Lavalink-v4.0%2B-FF3366?logo=audacity&logoColor=white)
@@ -12,7 +13,7 @@
 **A Discord music bot cluster for managing multiple voice rooms.**  
 **Run 1 to 5 bots in a single process, with independent playback in up to five voice rooms.**
 
-[Invite Bots](#official-bots--實作機器人邀請) • [Features](#key-features--核心功能) • [Commands](#slash-commands-reference--斜線指令一覽) • [Quick Start](#quick-start--快速開始) • [Audio Settings](#audio-settings--音訊設定) • [Feedback](#support--feedback--問題回饋與優化方案) • [License](#license)
+[Invite Bots](#official-bots--實作機器人邀請) • [Features](#key-features--核心功能) • [Commands](#slash-commands-reference--斜線指令一覽) • [Quick Start](#quick-start--快速開始) • [Audio Settings](#audio-settings--音訊設定) • [Changelog](#release-notes--更新日誌) • [Feedback](#support--feedback--問題回饋與優化方案)
 
 </div>
 
@@ -207,6 +208,17 @@ flowchart TD
 - **Extractor**: `yt-dlp` (Opus direct stream selector + Android/Web client bypass headers)
 - **Lyrics Engine**: LRCLIB synchronized API + Netease fallback
 - **i18n**: Built-in 6-language locale resolver (`en`, `zh-TW`, `zh-CN`, `ja`, `ko`, `es`)
+
+---
+
+## Release Notes / 更新日誌
+
+### v1.0.2 (2026-10-14)
+- 🐛 **修復變數作用域異常**：解決 `/play` 指令中變數命名衝突引發的 `UnboundLocalError`，大幅提升點歌流程穩定度。
+- ⚡ **Spotify 快取效能升級**：改用 `MemoryCacheHandler` 記憶體快取處理器，徹底消除無權限環境下的 `.cache` 磁碟寫入警告。
+- 🤖 **實作機器人權限完善**：全數 1～5 號機器人節點邀請連結統一配置管理員權限 (`permissions=8`)。
+- 🧹 **極簡純化架構**：徹底剔除內部冗餘註解與除錯資訊，減輕運算開銷並提升執行效率。
+- 🌐 **國際化語系偵測**：支援 6 種語言智慧解析，各房間即時狀態面板新增版本號標註。
 
 ---
 

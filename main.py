@@ -19,6 +19,8 @@ from lyrics import get_lyrics
 
 load_dotenv()
 
+__version__ = "1.0.2"
+
 try:
     import wavelink
     HAS_WAVELINK = True
@@ -1647,6 +1649,7 @@ def register_slash_commands(primary_bot: commands.Bot):
                     inline=True
                 )
 
+        embed.set_footer(text=f"DJ Donut v{__version__} | Multi-Room Music Cluster")
         await interaction.response.send_message(embed=embed)
 
     @tree.command(name="skip", description="跳過你當前語音房的機器人歌曲")
@@ -2060,7 +2063,7 @@ async def main():
         return
 
     print("=" * 65)
-    print(f"🚀 正在初始化多房間音樂機器人矩陣 (共檢測到 {len(TOKENS)} 隻機器人配置)...")
+    print(f"🚀 正在初始化多房間音樂機器人矩陣 v{__version__} (共檢測到 {len(TOKENS)} 隻機器人配置)...")
     print("=" * 65)
 
     tasks = []
