@@ -2,7 +2,7 @@
 
 <div align="center">
 
-![Version](https://img.shields.io/badge/Version-v1.2.0-blue?logo=git)
+![Version](https://img.shields.io/badge/Version-v1.3.0-blue?logo=git)
 ![Python](https://img.shields.io/badge/Python-3.10%20%7C%203.11%20%7C%203.12-3776AB?logo=python&logoColor=white)
 ![Discord.py](https://img.shields.io/badge/Discord.py-v2.7.0%2B-5865F2?logo=discord&logoColor=white)
 ![Lavalink](https://img.shields.io/badge/Lavalink-v4.0%2B-FF3366?logo=audacity&logoColor=white)
@@ -197,9 +197,44 @@ flowchart TD
 - **Lyrics Engine**: LRCLIB (synced) & NetEase (plain fallback)
 - **i18n**: Built-in 6-language locale detection (`en`, `zh-TW`, `zh-CN`, `ja`, `ko`, `es`)
 
+### Modular Project Layout
+
+```
+discord-music-bot/
+├── main.py              # Lightweight cluster entrypoint & matrix initializer
+├── bot.py               # Alternative entrypoint script
+├── config.py            # Global settings, presets, logger & BotError hierarchy
+├── core/
+│   ├── models.py        # Song, GuildMusicState & BufferedAudioSource
+│   ├── player.py        # Audio pipeline playback engine & play_next loop
+│   ├── dispatcher.py    # Voice channel matching & smart multi-bot routing
+│   └── node.py          # MusicNodeBot client definition & cluster lifecycle
+├── platforms/
+│   ├── youtube.py       # Stream URL extraction & smart autoplay finder
+│   ├── spotify.py       # Spotify web scraping, oEmbed & API track resolver
+│   ├── netease.py       # NetEase song, album & playlist resolver
+│   └── apple_music.py   # Apple Music metadata and album art scraper
+├── ui/
+│   ├── embeds.py        # Embed cards, progress bar & duration formatters
+│   └── views.py         # Dynamic 10-button music controller & select menus
+├── commands/
+│   ├── music.py         # /play, /search, /skip, /stop, /queue, /move
+│   ├── audio.py         # /seek, /bassboost, /filter, /bitrate, /engine
+│   └── admin.py         # /status, /help, /dj, /shuffle, /lyrics, /language
+├── i18n.py              # Multi-language translations
+└── lyrics.py            # Synced and plain lyrics provider
+```
+
 ---
 
 ## Changelog
+
+### v1.3.0 (2026-10-15)
+- **Modular Architecture Decomposition**: Broke down the 3,500+ line monolithic `main.py` into decoupled, maintainable packages (`core/`, `platforms/`, `ui/`, `commands/`, `config.py`).
+- **Centralized Settings & Presets**: Extracted all audio filter parameters, bass boost curves, ffmpeg/yt-dlp options, and guild persistence helpers into `config.py`.
+- **Standardized Error Hierarchy**: Introduced custom `BotError` base and specialized exceptions (`AudioSourceError`, `TrackNotFoundError`, `VoiceConnectionError`, `PermissionDeniedError`) for cleaner debugging.
+- **Structured Logging**: Replaced scattered print statements with a unified `logging` logger across all subsystems.
+- **Full Compatibility Preserved**: Seamless entrypoint support for both `python3 main.py` and `python3 bot.py`, zero circular imports, and zero docstrings/comments.
 
 ### v1.2.0 (2026-10-15)
 - **Interactive Search Menu**: Added `/search <query>` allowing users to search YouTube and pick tracks from an interactive Discord UI drop-down menu showing title, duration, and artist.
