@@ -7,6 +7,8 @@ import time
 import subprocess
 import threading
 import queue
+import random
+from concurrent.futures import ThreadPoolExecutor
 from collections import deque
 from typing import Dict, Optional, List, Tuple
 import yt_dlp
@@ -22,7 +24,7 @@ from lyrics import get_lyrics
 
 load_dotenv()
 
-__version__ = "1.0.5"
+__version__ = "1.1.0"
 
 try:
     import wavelink
@@ -104,14 +106,87 @@ def get_ytdl_opts(extract_flat: bool = False, noplaylist: bool = True) -> dict:
         opts['cookiefile'] = COOKIE_FILE
     return opts
 
-def get_ffmpeg_options(state: 'GuildMusicState') -> dict:
-    before = (
-        '-nostats -loglevel fatal '
-        '-headers "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36\r\nAccept: */*\r\n" '
-        '-http_persistent 0 '
-        '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 2 -reconnect_on_network_error 1 -reconnect_on_http_error 4xx,5xx '
+MEDIA_EXECUTOR = ThreadPoolExecutor(max_workers=10, thread_name_prefix='media_worker')
+_LOCAL_STORAGE = threading.local()
+
+def get_thread_ytdl(extract_flat: bool = False, noplaylist: bool = True) -> yt_dlp.YoutubeDL:
+    key = f"ytdl_{extract_flat}_{noplaylist}"
+    if not hasattr(_LOCAL_STORAGE, key):
+        opts = get_ytdl_opts(extract_flat=extract_flat, noplaylist=noplaylist)
+        setattr(_LOCAL_STORAGE, key, yt_dlp.YoutubeDL(opts))
+    return getattr(_LOCAL_STORAGE, key)
+
+STREAM_CACHE: Dict[str, Tuple[str, Optional[str], int, float]] = {}
+STREAM_CACHE_LOCK = threading.Lock()
+
+def get_cached_stream(key: str) -> Optional[Tuple[str, Optional[str], int]]:
+    now = time.time()
+    with STREAM_CACHE_LOCK:
+        if key in STREAM_CACHE:
+            stream_url, thumb, dur, expire_at = STREAM_CACHE[key]
+            if expire_at > now:
+                return stream_url, thumb, dur
+            del STREAM_CACHE[key]
+    return None
+
+def set_cached_stream(key: str, stream_url: str, thumb: Optional[str], dur: int, ttl: int = 1800):
+    now = time.time()
+    with STREAM_CACHE_LOCK:
+        if len(STREAM_CACHE) > 500:
+            expired_keys = [k for k, v in STREAM_CACHE.items() if v[3] <= now]
+            for k in expired_keys:
+                del STREAM_CACHE[k]
+            if len(STREAM_CACHE) > 500:
+                STREAM_CACHE.pop(next(iter(STREAM_CACHE)), None)
+        STREAM_CACHE[key] = (stream_url, thumb, dur, now + ttl)
+
+SETTINGS_FILE = os.path.join(os.path.dirname(__file__), "guild_settings.json")
+_SETTINGS_LOCK = threading.Lock()
+
+def load_all_guild_settings() -> dict:
+    if os.path.exists(SETTINGS_FILE):
+        try:
+            with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+    return {}
+
+def save_guild_setting(guild_id: int, key: str, value):
+    with _SETTINGS_LOCK:
+        try:
+            data = load_all_guild_settings()
+            gid = str(guild_id)
+            if gid not in data:
+                data[gid] = {}
+            data[gid][key] = value
+            with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+
+def parse_time_str(time_str: str) -> Optional[int]:
+    time_str = time_str.strip()
+    if time_str.isdigit():
+        return int(time_str)
+    parts = time_str.split(':')
+    if len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit():
+        return int(parts[0]) * 60 + int(parts[1])
+    if len(parts) == 3 and parts[0].isdigit() and parts[1].isdigit() and parts[2].isdigit():
+        return int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])
+    return None
+
+def get_ffmpeg_options(state: 'GuildMusicState', seek_seconds: Optional[int] = None) -> dict:
+    before_parts = [
+        '-nostats -loglevel fatal',
+        '-headers "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36\r\nAccept: */*\r\n"',
+        '-http_persistent 0',
+        '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 2 -reconnect_on_network_error 1 -reconnect_on_http_error 4xx,5xx',
         '-probesize 256k -analyzeduration 1000000'
-    )
+    ]
+    if seek_seconds and seek_seconds > 0:
+        before_parts.insert(1, f"-ss {seek_seconds}")
+    before = " ".join(before_parts)
     filters = []
     bb = BASSBOOST_PRESETS.get(state.bassboost, {}).get("ffmpeg")
     if bb:
@@ -137,6 +212,12 @@ class BufferedAudioSource(discord.AudioSource):
         self._empty_count = 0
         self._thread = threading.Thread(target=self._worker, daemon=True)
         self._thread.start()
+
+    def __del__(self):
+        try:
+            self.cleanup()
+        except Exception:
+            pass
 
     def _worker(self):
         while not self._stop_event.is_set():
@@ -216,6 +297,7 @@ class GuildMusicState:
     def __init__(self, guild_id: int):
         self.guild_id = guild_id
         self.queue = deque()
+        self.history = deque(maxlen=30)
         self.current: Optional[Song] = None
         self.last_played: Optional[Song] = None
         self.loop_mode: str = 'off'
@@ -231,6 +313,26 @@ class GuildMusicState:
         self.start_time: float = 0.0
         self.paused_duration: float = 0.0
         self.pause_timestamp: float = 0.0
+        self.consecutive_failures: int = 0
+        self.is_seeking: bool = False
+        self.current_view: Optional[discord.ui.View] = None
+        self.last_active: float = time.time()
+        self.load_persisted_settings()
+
+    def load_persisted_settings(self):
+        data = load_all_guild_settings().get(str(self.guild_id), {})
+        if "volume" in data:
+            self.volume = float(data["volume"])
+        if "lang" in data:
+            self.lang = data["lang"]
+        if "mode_247" in data:
+            self.mode_247 = bool(data["mode_247"])
+        if "bassboost" in data and data["bassboost"] in BASSBOOST_PRESETS:
+            self.bassboost = data["bassboost"]
+        if "filter" in data and data["filter"] in EQ_PRESETS:
+            self.filter = data["filter"]
+        if "autoplay" in data:
+            self.autoplay = bool(data["autoplay"])
 
 def _extract_media_info(data: Optional[dict]) -> Tuple[Optional[str], Optional[str], int]:
     if not data:
@@ -254,37 +356,51 @@ def _extract_media_info(data: Optional[dict]) -> Tuple[Optional[str], Optional[s
     return None, None, 0
 
 def extract_stream_url_sync(song_url: str, song_title: str) -> Tuple[Optional[str], Optional[str], int]:
+    cache_key = song_url or song_title
+    cached = get_cached_stream(cache_key)
+    if cached:
+        return cached
+
+    stream_url, thumb, dur = None, None, 0
+
     if not ("spotify.com" in song_url or song_url.startswith("spotify:")):
-        try:
-            ydl = yt_dlp.YoutubeDL(get_ytdl_opts(extract_flat=False, noplaylist=True))
-            data = ydl.extract_info(song_url, download=False)
-            stream_url, thumb, dur = _extract_media_info(data)
-            if stream_url:
-                return stream_url, thumb, dur
-        except Exception:
-            pass
+        for attempt in range(2):
+            try:
+                ydl = get_thread_ytdl(extract_flat=False, noplaylist=True)
+                data = ydl.extract_info(song_url, download=False)
+                stream_url, thumb, dur = _extract_media_info(data)
+                if stream_url:
+                    break
+            except Exception:
+                if attempt == 0:
+                    time.sleep(0.5)
 
-    if song_title:
-        try:
-            clean_title = re.sub(r'[\(\[\{].*?[\)\]\}]', '', song_title).strip()
-            yt_query = f"ytsearch5:{clean_title or song_title}"
-            ydl_yt = yt_dlp.YoutubeDL(get_ytdl_opts(extract_flat=False, noplaylist=True))
-            yt_data = ydl_yt.extract_info(yt_query, download=False)
-            stream_url, thumb, dur = _extract_media_info(yt_data)
-            if stream_url:
-                return stream_url, thumb, dur
-        except Exception:
-            pass
+    if not stream_url and song_title:
+        clean_title = re.sub(r'[\(\[\{].*?[\)\]\}]', '', song_title).strip()
+        yt_query = f"ytsearch5:{clean_title or song_title}"
+        for attempt in range(2):
+            try:
+                ydl_yt = get_thread_ytdl(extract_flat=False, noplaylist=True)
+                yt_data = ydl_yt.extract_info(yt_query, download=False)
+                stream_url, thumb, dur = _extract_media_info(yt_data)
+                if stream_url:
+                    break
+            except Exception:
+                if attempt == 0:
+                    time.sleep(0.5)
 
+    if not stream_url and song_title:
         try:
             sc_query = f"scsearch3:{song_title}"
-            ydl_sc = yt_dlp.YoutubeDL(get_ytdl_opts(extract_flat=False, noplaylist=True))
+            ydl_sc = get_thread_ytdl(extract_flat=False, noplaylist=True)
             sc_data = ydl_sc.extract_info(sc_query, download=False)
             stream_url, thumb, dur = _extract_media_info(sc_data)
-            if stream_url:
-                return stream_url, thumb, dur
         except Exception:
             pass
+
+    if stream_url:
+        set_cached_stream(cache_key, stream_url, thumb, dur)
+        return stream_url, thumb, dur
 
     return None, None, 0
 
@@ -693,7 +809,7 @@ def resolve_spotify_sync(url: str) -> Optional[dict]:
 
 async def resolve_spotify(url: str) -> Optional[dict]:
     loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(None, lambda: resolve_spotify_sync(url))
+    return await loop.run_in_executor(MEDIA_EXECUTOR, lambda: resolve_spotify_sync(url))
 
 def resolve_netease_sync(url: str) -> Optional[dict]:
     if "163cn.tv" in url or "163.lu" in url or "/s/" in url:
@@ -836,7 +952,7 @@ def resolve_netease_sync(url: str) -> Optional[dict]:
 
 async def resolve_netease(url: str) -> Optional[dict]:
     loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(None, lambda: resolve_netease_sync(url))
+    return await loop.run_in_executor(MEDIA_EXECUTOR, lambda: resolve_netease_sync(url))
 
 def format_apple_artwork(art_obj) -> str:
     if not art_obj:
@@ -1044,7 +1160,7 @@ def resolve_apple_music_sync(url: str) -> Optional[dict]:
 
 async def resolve_apple_music(url: str) -> Optional[dict]:
     loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(None, lambda: resolve_apple_music_sync(url))
+    return await loop.run_in_executor(MEDIA_EXECUTOR, lambda: resolve_apple_music_sync(url))
 
 def is_vc_connected(vc) -> bool:
     if not vc:
@@ -1260,6 +1376,7 @@ class MusicControllerView(discord.ui.View):
             await interaction.response.send_message(t('not_playing', interaction), ephemeral=True)
             return
         self.state.volume = max(0.0, round(self.state.volume - 0.1, 2))
+        save_guild_setting(self.state.guild_id, "volume", self.state.volume)
         if hasattr(vc, 'source') and hasattr(vc.source, 'volume'):
             vc.source.volume = self.state.volume
         embed = build_nowplaying_embed(self.bot, self.state.current, self.state, lang=resolve_locale(interaction))
@@ -1272,6 +1389,7 @@ class MusicControllerView(discord.ui.View):
             await interaction.response.send_message(t('not_playing', interaction), ephemeral=True)
             return
         self.state.volume = min(2.0, round(self.state.volume + 0.1, 2))
+        save_guild_setting(self.state.guild_id, "volume", self.state.volume)
         if hasattr(vc, 'source') and hasattr(vc.source, 'volume'):
             vc.source.volume = self.state.volume
         embed = build_nowplaying_embed(self.bot, self.state.current, self.state, lang=resolve_locale(interaction))
@@ -1280,6 +1398,7 @@ class MusicControllerView(discord.ui.View):
     @discord.ui.button(label="接歌", emoji="📻", style=discord.ButtonStyle.secondary, row=1, custom_id="music_autoplay")
     async def toggle_autoplay(self, interaction: discord.Interaction, button: discord.ui.Button):
         self.state.autoplay = not self.state.autoplay
+        save_guild_setting(self.state.guild_id, "autoplay", self.state.autoplay)
         self._update_button_states()
         embed = build_nowplaying_embed(self.bot, self.state.current, self.state, lang=resolve_locale(interaction))
         await interaction.response.edit_message(embed=embed, view=self)
@@ -1293,7 +1412,7 @@ class MusicControllerView(discord.ui.View):
         target_title = self.state.current.title
         target_artist = self.state.current.uploader or ""
         loop = asyncio.get_event_loop()
-        res = await loop.run_in_executor(None, lambda: get_lyrics(target_title, target_artist))
+        res = await loop.run_in_executor(MEDIA_EXECUTOR, lambda: get_lyrics(target_title, target_artist))
         if not res:
             await interaction.followup.send(t('lyrics_not_found', interaction, title=target_title), ephemeral=True)
             return
@@ -1541,7 +1660,7 @@ def _fetch_autoplay_sync(last_title: str) -> Optional[dict]:
         clean_title = re.sub(r'[\(\[\{].*?[\)\]\}]', '', last_title).strip()
         clean_title = re.sub(r'(official\s+video|official\s+audio|mv|lyrics|feat\..*|ft\..*)', '', clean_title, flags=re.I).strip()
         query = f"ytsearch5:{clean_title} radio"
-        ydl = yt_dlp.YoutubeDL(get_ytdl_opts(extract_flat=True, noplaylist=True))
+        ydl = get_thread_ytdl(extract_flat=True, noplaylist=True)
         info = ydl.extract_info(query, download=False)
         if info and 'entries' in info:
             for entry in info['entries']:
@@ -1557,7 +1676,7 @@ def _fetch_autoplay_sync(last_title: str) -> Optional[dict]:
     return None
 
 async def fetch_autoplay_recommendation(last_played: Song, loop) -> Optional[Song]:
-    entry = await loop.run_in_executor(None, lambda: _fetch_autoplay_sync(last_played.title))
+    entry = await loop.run_in_executor(MEDIA_EXECUTOR, lambda: _fetch_autoplay_sync(last_played.title))
     if entry:
         return Song(entry, requester=last_played.requester)
     return None
@@ -1572,6 +1691,7 @@ async def play_next(bot: MusicNodeBot, guild: discord.Guild):
 
     if state.current:
         state.last_played = state.current
+        state.history.appendleft(state.current)
         if state.loop_mode == 'single':
             state.queue.appendleft(state.current)
         elif state.loop_mode == 'queue':
@@ -1652,8 +1772,14 @@ async def play_next(bot: MusicNodeBot, guild: discord.Guild):
                     await vc.set_volume(int(state.volume * 100))
 
                 if state.text_channel:
+                    if state.current_view:
+                        try:
+                            state.current_view.stop()
+                        except Exception:
+                            pass
                     embed = build_nowplaying_embed(bot, next_song, state)
                     view = MusicControllerView(bot, state)
+                    state.current_view = view
                     await state.text_channel.send(embed=embed, view=view)
                 return
             except Exception as e:
@@ -1676,11 +1802,21 @@ async def play_next(bot: MusicNodeBot, guild: discord.Guild):
     state.active_engine = "🔥 Native Studio Engine (384k VBR)"
     loop = asyncio.get_event_loop()
     stream_url, thumbnail, duration = await loop.run_in_executor(
-        None, lambda: extract_stream_url_sync(next_song.url, next_song.title)
+        MEDIA_EXECUTOR, lambda: extract_stream_url_sync(next_song.url, next_song.title)
     )
 
     if not stream_url:
-        print(f"[{bot.node_name}] 無法提取串流: {next_song.title}，自動嘗試下一首...")
+        state.consecutive_failures += 1
+        print(f"[{bot.node_name}] 無法提取串流: {next_song.title} (連續失敗: {state.consecutive_failures})，自動嘗試下一首...")
+        if state.consecutive_failures >= 5:
+            state.is_playing = False
+            state.current = None
+            if state.text_channel:
+                try:
+                    await state.text_channel.send("⚠️ 檢測到連續 5 首歌曲解析失敗，已自動暫停播放以防止循環異常。")
+                except Exception:
+                    pass
+            return
         if state.text_channel:
             try:
                 await state.text_channel.send(t('stream_failed', guild_id=guild.id, bot_name=bot.node_name, title=next_song.title))
@@ -1689,10 +1825,13 @@ async def play_next(bot: MusicNodeBot, guild: discord.Guild):
         await play_next(bot, guild)
         return
 
+    state.consecutive_failures = 0
+
     if thumbnail and not next_song.thumbnail:
         next_song.thumbnail = thumbnail
     if duration and not next_song.duration:
         next_song.duration = duration
+    next_song.stream_url = stream_url
 
     try:
         ffmpeg_opts = get_ffmpeg_options(state)
@@ -1701,6 +1840,8 @@ async def play_next(bot: MusicNodeBot, guild: discord.Guild):
         audio_source = discord.PCMVolumeTransformer(buffered_source, volume=state.volume)
 
         def after_callback(error):
+            if state.is_seeking:
+                return
             if error:
                 print(f"[{bot.node_name} Player Error] {error}")
             fut = asyncio.run_coroutine_threadsafe(play_next(bot, guild), bot.loop)
@@ -1725,8 +1866,14 @@ async def play_next(bot: MusicNodeBot, guild: discord.Guild):
                 vc.play(audio_source, after=after_callback)
 
         if state.text_channel:
+            if state.current_view:
+                try:
+                    state.current_view.stop()
+                except Exception:
+                    pass
             embed = build_nowplaying_embed(bot, next_song, state)
             view = MusicControllerView(bot, state)
+            state.current_view = view
             await state.text_channel.send(embed=embed, view=view)
 
     except Exception as e:
@@ -2079,7 +2226,7 @@ def register_slash_commands(primary_bot: commands.Bot):
             yt_data = None
             try:
                 data = await loop.run_in_executor(
-                    None, lambda: yt_dlp.YoutubeDL(get_ytdl_opts(extract_flat=False, noplaylist=True)).extract_info(search_q, download=False)
+                    MEDIA_EXECUTOR, lambda: get_thread_ytdl(extract_flat=False, noplaylist=True).extract_info(search_q, download=False)
                 )
                 if data and 'entries' in data and data['entries']:
                     for entry in data['entries']:
@@ -2095,7 +2242,7 @@ def register_slash_commands(primary_bot: commands.Bot):
                 try:
                     sc_q = f"scsearch3:{t_title} {t_artist}".strip()
                     data = await loop.run_in_executor(
-                        None, lambda: yt_dlp.YoutubeDL(get_ytdl_opts(extract_flat=False, noplaylist=True)).extract_info(sc_q, download=False)
+                        MEDIA_EXECUTOR, lambda: get_thread_ytdl(extract_flat=False, noplaylist=True).extract_info(sc_q, download=False)
                     )
                     if data and 'entries' in data and data['entries']:
                         for entry in data['entries']:
@@ -2139,7 +2286,7 @@ def register_slash_commands(primary_bot: commands.Bot):
         if is_playlist:
             try:
                 data = await loop.run_in_executor(
-                    None, lambda: yt_dlp.YoutubeDL(get_ytdl_opts(extract_flat=True, noplaylist=False)).extract_info(查詢, download=False)
+                    MEDIA_EXECUTOR, lambda: get_thread_ytdl(extract_flat=True, noplaylist=False).extract_info(查詢, download=False)
                 )
             except Exception as e:
                 await interaction.followup.send(f"❌ 讀取播放清單失敗: `{e}`")
@@ -2184,13 +2331,13 @@ def register_slash_commands(primary_bot: commands.Bot):
 
         try:
             data = await loop.run_in_executor(
-                None, lambda: yt_dlp.YoutubeDL(get_ytdl_opts(extract_flat=False, noplaylist=True)).extract_info(查詢, download=False)
+                MEDIA_EXECUTOR, lambda: get_thread_ytdl(extract_flat=False, noplaylist=True).extract_info(查詢, download=False)
             )
         except Exception as e:
             try:
                 sc_q = f"scsearch:{查詢}"
                 data = await loop.run_in_executor(
-                    None, lambda: yt_dlp.YoutubeDL(get_ytdl_opts(extract_flat=False, noplaylist=True)).extract_info(sc_q, download=False)
+                    MEDIA_EXECUTOR, lambda: get_thread_ytdl(extract_flat=False, noplaylist=True).extract_info(sc_q, download=False)
                 )
             except Exception:
                 await interaction.followup.send(f"❌ 找不到該歌曲或解析失敗: `{e}`")
@@ -2315,6 +2462,15 @@ def register_slash_commands(primary_bot: commands.Bot):
             inline=False
         )
         embed.add_field(
+            name="📑 隊列進階管理",
+            value="> `/seek <時間>` — 精確跳轉當前歌曲播放進度 (如: 90 或 01:30)\n"
+                  "> `/shuffle` — 隨機打亂當前語音房的待播歌單隊列\n"
+                  "> `/remove <編號>` — 移除待播清單中的指定序號歌曲\n"
+                  "> `/clear` — 一鍵清空當前語音房所有的待播歌曲\n"
+                  "> `/history` — 檢視最近播放的 15 首歷史歌曲紀錄",
+            inline=False
+        )
+        embed.add_field(
             name="🎚️ 音質與錄音室等化器",
             value="> `/bassboost <強度>` — 即時調節 +4dB ~ +20dB 重低音\n"
                   "> `/filter <預設>` — 套用專業濾鏡 (搖滾/流行/人聲/夜核/8D等)\n"
@@ -2417,6 +2573,198 @@ def register_slash_commands(primary_bot: commands.Bot):
         embed = build_queue_embed(b, state, lang=resolve_locale(interaction))
         await interaction.response.send_message(embed=embed)
 
+    @tree.command(name="seek", description="跳轉至當前播放歌曲的指定時間點 (例如: 90 或 01:30)")
+    @app_commands.describe(時間="跳轉時間，格式可為秒數 (如 90) 或 分:秒 (如 01:30)")
+    async def slash_seek(interaction: discord.Interaction, 時間: str):
+        voice_channel = await get_user_voice_channel(interaction)
+        if not voice_channel:
+            await interaction.response.send_message(t('must_join_voice', interaction), ephemeral=True)
+            return
+
+        b = get_bot_in_user_room(interaction.guild_id, voice_channel, interaction.guild)
+        if not b:
+            await interaction.response.send_message(t('no_bot_in_room', interaction), ephemeral=True)
+            return
+
+        state = b.get_state(interaction.guild_id)
+        if not state.current:
+            await interaction.response.send_message(t('not_playing', interaction), ephemeral=True)
+            return
+
+        target_sec = parse_time_str(時間)
+        if target_sec is None or target_sec < 0:
+            await interaction.response.send_message("❌ 無效的時間格式！請使用秒數 (如 90) 或 分:秒 (如 01:30)。", ephemeral=True)
+            return
+
+        if state.current.duration and target_sec > state.current.duration:
+            await interaction.response.send_message(f"❌ 跳轉時間超過歌曲長度 ({format_duration(state.current.duration)})！", ephemeral=True)
+            return
+
+        bot_guild = get_bot_guild(b, interaction.guild_id, interaction.guild) or interaction.guild
+        vc = (bot_guild.voice_client if bot_guild else None) or discord.utils.get(getattr(b, 'voice_clients', []), guild__id=interaction.guild_id)
+        if not vc or not is_vc_connected(vc):
+            await interaction.response.send_message(t('not_playing', interaction), ephemeral=True)
+            return
+
+        if b.lavalink_connected and HAS_WAVELINK and hasattr(vc, 'seek'):
+            try:
+                await vc.seek(target_sec * 1000)
+                state.start_time = time.time() - target_sec
+                state.paused_duration = 0.0
+                state.pause_timestamp = 0.0
+                await interaction.response.send_message(f"⏩ 已成功跳轉至 **{format_duration(target_sec)}**！")
+                return
+            except Exception as e:
+                print(f"[{b.node_name}] Lavalink Seek Error: {e}")
+
+        await interaction.response.defer()
+        state.is_seeking = True
+        stream_url = getattr(state.current, 'stream_url', '')
+        if not stream_url or not stream_url.startswith('http'):
+            loop = asyncio.get_event_loop()
+            stream_url, _, _ = await loop.run_in_executor(
+                MEDIA_EXECUTOR, lambda: extract_stream_url_sync(state.current.url, state.current.title)
+            )
+        if not stream_url:
+            state.is_seeking = False
+            await interaction.followup.send("❌ 無法提取音訊串流以執行跳轉！", ephemeral=True)
+            return
+
+        state.current.stream_url = stream_url
+        if is_vc_playing(vc) or is_vc_paused(vc):
+            await safe_stop(vc)
+
+        try:
+            ffmpeg_opts = get_ffmpeg_options(state, seek_seconds=target_sec)
+            source = discord.FFmpegPCMAudio(stream_url, stderr=subprocess.DEVNULL, **ffmpeg_opts)
+            buffered_source = BufferedAudioSource(source, prefetch_frames=50, max_frames=250)
+            audio_source = discord.PCMVolumeTransformer(buffered_source, volume=state.volume)
+
+            def after_callback(error):
+                if state.is_seeking:
+                    return
+                if error:
+                    print(f"[{b.node_name} Player Error] {error}")
+                fut = asyncio.run_coroutine_threadsafe(play_next(b, bot_guild), b.loop)
+                try:
+                    fut.result()
+                except Exception as e:
+                    print(f"[{b.node_name} Player Next Error] {e}")
+
+            vc.play(audio_source, after=after_callback)
+            state.start_time = time.time() - target_sec
+            state.paused_duration = 0.0
+            state.pause_timestamp = 0.0
+            state.is_seeking = False
+            await interaction.followup.send(f"⏩ 已成功跳轉至 **{format_duration(target_sec)}**！")
+        except Exception as e:
+            state.is_seeking = False
+            await interaction.followup.send(f"❌ 跳轉執行失敗: `{e}`", ephemeral=True)
+
+    @tree.command(name="shuffle", description="隨機打亂當前語音房的待播歌單隊列")
+    async def slash_shuffle(interaction: discord.Interaction):
+        voice_channel = await get_user_voice_channel(interaction)
+        if not voice_channel:
+            await interaction.response.send_message(t('must_join_voice', interaction), ephemeral=True)
+            return
+
+        b = get_bot_in_user_room(interaction.guild_id, voice_channel, interaction.guild)
+        if not b:
+            await interaction.response.send_message(t('no_bot_in_room', interaction), ephemeral=True)
+            return
+
+        state = b.get_state(interaction.guild_id)
+        if len(state.queue) < 2:
+            await interaction.response.send_message("❌ 待播隊列中至少需要有 2 首歌曲才能進行隨機打亂！", ephemeral=True)
+            return
+
+        queue_list = list(state.queue)
+        random.shuffle(queue_list)
+        state.queue = deque(queue_list)
+        await interaction.response.send_message(f"🔀 已成功打亂待播隊列！共 **{len(state.queue)}** 首歌曲已重新排序。")
+
+    @tree.command(name="remove", description="從待播清單中移除指定序號的歌曲")
+    @app_commands.describe(編號="要移除的歌曲序號 (從 1 開始，可由 /queue 查詢)")
+    async def slash_remove(interaction: discord.Interaction, 編號: int):
+        voice_channel = await get_user_voice_channel(interaction)
+        if not voice_channel:
+            await interaction.response.send_message(t('must_join_voice', interaction), ephemeral=True)
+            return
+
+        b = get_bot_in_user_room(interaction.guild_id, voice_channel, interaction.guild)
+        if not b:
+            await interaction.response.send_message(t('no_bot_in_room', interaction), ephemeral=True)
+            return
+
+        state = b.get_state(interaction.guild_id)
+        if not state.queue:
+            await interaction.response.send_message("❌ 待播隊列目前為空！", ephemeral=True)
+            return
+
+        if 編號 < 1 or 編號 > len(state.queue):
+            await interaction.response.send_message(f"❌ 無效的歌曲序號！請輸入 1 ~ {len(state.queue)} 之間的數字。", ephemeral=True)
+            return
+
+        queue_list = list(state.queue)
+        removed_song = queue_list.pop(編號 - 1)
+        state.queue = deque(queue_list)
+        await interaction.response.send_message(f"🗑️ 已從待播隊列移除第 **{編號}** 首：**{removed_song.title}**")
+
+    @tree.command(name="clear", description="一鍵清空當前語音房所有的待播歌曲隊列")
+    async def slash_clear(interaction: discord.Interaction):
+        voice_channel = await get_user_voice_channel(interaction)
+        if not voice_channel:
+            await interaction.response.send_message(t('must_join_voice', interaction), ephemeral=True)
+            return
+
+        b = get_bot_in_user_room(interaction.guild_id, voice_channel, interaction.guild)
+        if not b:
+            await interaction.response.send_message(t('no_bot_in_room', interaction), ephemeral=True)
+            return
+
+        state = b.get_state(interaction.guild_id)
+        count = len(state.queue)
+        if count == 0:
+            await interaction.response.send_message("❌ 待播隊列原本就是空的！", ephemeral=True)
+            return
+
+        state.queue.clear()
+        await interaction.response.send_message(f"🧹 已清空待播隊列中所有的 **{count}** 首歌曲！")
+
+    @tree.command(name="history", description="檢視當前語音房最近播放過的歷史歌曲紀錄")
+    async def slash_history(interaction: discord.Interaction):
+        voice_channel = await get_user_voice_channel(interaction)
+        if not voice_channel:
+            await interaction.response.send_message(t('must_join_voice', interaction), ephemeral=True)
+            return
+
+        b = get_bot_in_user_room(interaction.guild_id, voice_channel, interaction.guild)
+        if not b:
+            await interaction.response.send_message(t('no_bot_in_room', interaction), ephemeral=True)
+            return
+
+        state = b.get_state(interaction.guild_id)
+        if not state.history:
+            await interaction.response.send_message("📜 目前尚無已播放的歷史歌曲紀錄！", ephemeral=True)
+            return
+
+        embed = discord.Embed(
+            title=f"📜 【{b.node_name}】最近播放歷史 (共 {len(state.history)} 首)",
+            color=0x3498DB
+        )
+        history_list = list(state.history)
+        history_list.reverse()
+        desc_lines = []
+        for i, s in enumerate(history_list[:15], 1):
+            dur = format_duration(s.duration)
+            song_link = f"[{s.title[:45]}]({s.url})" if s.url else s.title[:45]
+            req_str = f" • <@{s.requester.id}>" if (hasattr(s, 'requester') and s.requester and hasattr(s.requester, 'id')) else ""
+            desc_lines.append(f"`{i}.` **{song_link}** `[{dur}]`{req_str}")
+
+        embed.description = "\n".join(desc_lines)
+        embed.set_footer(text=f"DJ Donut v{__version__} | 顯示最近 15 首紀錄")
+        await interaction.response.send_message(embed=embed)
+
     @tree.command(name="nowplaying", description="查看你所在語音房當前歌曲詳情與控制器")
     async def slash_nowplaying(interaction: discord.Interaction):
         voice_channel = await get_user_voice_channel(interaction)
@@ -2511,6 +2859,7 @@ def register_slash_commands(primary_bot: commands.Bot):
 
         state = b.get_state(interaction.guild_id)
         state.bassboost = 等級.value
+        save_guild_setting(interaction.guild_id, "bassboost", 等級.value)
         choice_label = 等級.name
 
         bot_guild = get_bot_guild(b, interaction.guild_id, interaction.guild) or interaction.guild
@@ -2562,6 +2911,7 @@ def register_slash_commands(primary_bot: commands.Bot):
 
         state = b.get_state(interaction.guild_id)
         state.filter = 音效.value
+        save_guild_setting(interaction.guild_id, "filter", 音效.value)
         choice_label = 音效.name
 
         bot_guild = get_bot_guild(b, interaction.guild_id, interaction.guild) or interaction.guild
@@ -2625,6 +2975,7 @@ def register_slash_commands(primary_bot: commands.Bot):
 
         state = b.get_state(interaction.guild_id)
         state.autoplay = not state.autoplay
+        save_guild_setting(interaction.guild_id, "autoplay", state.autoplay)
         if state.autoplay:
             msg = t('autoplay_enabled', interaction, bot_name=b.node_name)
         else:
@@ -2645,6 +2996,7 @@ def register_slash_commands(primary_bot: commands.Bot):
 
         state = b.get_state(interaction.guild_id)
         state.mode_247 = not state.mode_247
+        save_guild_setting(interaction.guild_id, "mode_247", state.mode_247)
         if state.mode_247:
             msg = t('mode_247_enabled', interaction, bot_name=b.node_name)
         else:
@@ -2674,7 +3026,7 @@ def register_slash_commands(primary_bot: commands.Bot):
             return
 
         loop = asyncio.get_event_loop()
-        res = await loop.run_in_executor(None, lambda: get_lyrics(target_title, target_artist))
+        res = await loop.run_in_executor(MEDIA_EXECUTOR, lambda: get_lyrics(target_title, target_artist))
 
         if not res:
             await interaction.followup.send(t('lyrics_not_found', interaction, title=target_title))
@@ -2710,6 +3062,7 @@ def register_slash_commands(primary_bot: commands.Bot):
             return
 
         GUILD_LANGUAGES[guild_id] = 語言.value
+        save_guild_setting(guild_id, "lang", 語言.value)
         for b in NODE_BOTS:
             state = b.get_state(guild_id)
             state.lang = 語言.value
