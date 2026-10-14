@@ -1,4 +1,4 @@
-# DJ Donut — Discord Multi-Room Music Bot Cluster（多房間音樂機器人）
+# DJ Donut — Discord Multi-Room Music Bot
 
 <div align="center">
 
@@ -10,193 +10,162 @@
 ![i18n](https://img.shields.io/badge/i18n-6%20Languages-4CAF50)
 ![License](https://img.shields.io/badge/License-MIT-blue.svg)
 
-**A Discord music bot cluster for managing multiple voice rooms.**  
-**Run 1 to 5 bots in a single process, with independent playback in up to five voice rooms.**
+**A lightweight, multi-room Discord music bot cluster.**  
+Run 1 to 5 bot instances inside a single Python process to stream music into multiple voice channels simultaneously, each with independent queues and audio controls.
 
-[Invite Bots](#official-bots--實作機器人邀請) • [Features](#key-features--核心功能) • [Commands](#slash-commands-reference--斜線指令一覽) • [Quick Start](#quick-start--快速開始) • [Audio Settings](#audio-settings--音訊設定) • [Changelog](#release-notes--更新日誌) • [Feedback](#support--feedback--問題回饋與優化方案)
+[Bot Invitations](#bot-invitations) • [Features](#features) • [Slash Commands](#slash-commands) • [Quick Start](#quick-start) • [Audio Tips](#audio-troubleshooting) • [Changelog](#changelog) • [Feedback](#support--feedback)
 
 </div>
 
 ---
 
-## Official Bots / 實作機器人邀請
+## Bot Invitations
 
-可以直接將已架設的 **DJ Donut** 機器人矩陣邀請至你的 Discord 伺服器，立即體驗多房間獨立音樂播放：
+You can invite the pre-hosted **DJ Donut** cluster directly to your server:
 
-| 機器人節點 | 邀請連結 (OAuth2 URL) | 權限設定 |
+| Bot Node | Invite Link | Default Permissions |
 | :--- | :--- | :--- |
-| DJ Donut 1  | [DJ Donut 1](https://discord.com/oauth2/authorize?client_id=1549028983641743462&permissions=8&integration_type=0&scope=bot) | 管理員權限 (`permissions=8`) |
-| DJ Donut 2  | [DJ Donut 2](https://discord.com/oauth2/authorize?client_id=1549258600155979956&permissions=8&integration_type=0&scope=bot) | 管理員權限 (`permissions=8`) |
-| DJ Donut 3  | [DJ Donut 3](https://discord.com/oauth2/authorize?client_id=1549259098761990184&permissions=8&integration_type=0&scope=bot) | 管理員權限 (`permissions=8`) |
-| DJ Donut 4  | [DJ Donut 4](https://discord.com/oauth2/authorize?client_id=1549259563646062743&permissions=8&integration_type=0&scope=bot) | 管理員權限 (`permissions=8`) |
-| DJ Donut 5  | [DJ Donut 5](https://discord.com/oauth2/authorize?client_id=1549259919696592976&permissions=8&integration_type=0&scope=bot) | 管理員權限 (`permissions=8`) |
+| **DJ Donut 1** | [Invite Bot 1](https://discord.com/oauth2/authorize?client_id=1549028983641743462&permissions=8&integration_type=0&scope=bot) | Administrator (`permissions=8`) |
+| **DJ Donut 2** | [Invite Bot 2](https://discord.com/oauth2/authorize?client_id=1549258600155979956&permissions=8&integration_type=0&scope=bot) | Administrator (`permissions=8`) |
+| **DJ Donut 3** | [Invite Bot 3](https://discord.com/oauth2/authorize?client_id=1549259098761990184&permissions=8&integration_type=0&scope=bot) | Administrator (`permissions=8`) |
+| **DJ Donut 4** | [Invite Bot 4](https://discord.com/oauth2/authorize?client_id=1549259563646062743&permissions=8&integration_type=0&scope=bot) | Administrator (`permissions=8`) |
+| **DJ Donut 5** | [Invite Bot 5](https://discord.com/oauth2/authorize?client_id=1549259919696592976&permissions=8&integration_type=0&scope=bot) | Administrator (`permissions=8`) |
 
-> 💡 **多房間分流運作說明**：
-> - 只要將多隻機器人邀請至同一伺服器，使用者在不同語音房輸入 `/play` 時，系統會**自動指派空閒的機器人進房**，實現多個房間同時獨立播放音樂！
-> - 若伺服器內只有 1 隻機器人，當該機器人正在播放時，其他房間將無法使用，直到播放結束或邀請更多機器人進群。
-
----
-
-## Key Features / 核心功能
-
-- **Multi-room playback（多房間播放）**:
-  - Run up to five Discord music bots in one Python process or Pterodactyl panel.
-  - Use `/play <query>` to play music. The dispatcher checks the user’s voice channel and assigns an available bot when needed.
-  - Each of the five rooms can have its own playback, queue, volume, and audio effects.
-
-- **Dual-engine architecture（雙引擎架構）**:
-  - **Engine A (Lavalink v4 + Wavelink)**: Supports Opus passthrough, JDA-NAS clock scheduling, and real-time 32-bit float DSP equalization.
-  - **Engine B (FFmpeg)**: Runs without a separate Lavalink server. Includes an Opus transcoding pipeline, a 16 MB ring buffer, a one-thread CPU limit (`-threads 1`), and headers intended to help with YouTube 403 errors.
-
-- **Localization（多國語言）**:
-  - Supports **English (🇺🇸)**, **繁體中文 (🇹🇼)**, **简体中文 (🇨🇳)**, **日本語 (🇯🇵)**, **한국어 (🇰🇷)**, and **Español (🇪🇸)**.
-  - Detects each user’s Discord client language through `interaction.locale`.
-  - Server administrators can set the default language with `/language`.
-
-- **Autoplay（自動接歌）**:
-  - Run `/autoplay` to enable radio mode. When the queue ends, the bot looks for tracks with a similar style.
-
-- **Lyrics（歌詞）**:
-  - Run `/lyrics [song]` to look up synchronized or plain lyrics from LRCLIB and Netease Cloud. No API key is required for these lookups.
-
-- **24/7 mode（常駐模式）**:
-  - Run `/247` to keep the bot in a voice channel when listeners leave or playback is paused.
-
-- **Multi-Platform Music Links（多平台音樂連結解析）**:
-  - **Spotify**: 支援單曲、歌單與專輯連結解析，自動匹配高品質音源。
-  - **網易雲音樂 (Netease Cloud Music)**: 支援單曲 (`song?id=`)、歌單 (`playlist?id=`)、專輯 (`album?id=`) 以及官方短網址 (`163cn.tv` / `163.lu`)，免 API Key 即時解析。
-  - **Apple Music**: 支援單曲、專輯與官方公開歌單 (`music.apple.com` / `apple.co`)，自動提取高畫質封面與音軌清單。
-  - **YouTube & SoundCloud**: 支援直接貼上影片、播放清單或關鍵字點歌。
-
-- **Equalizer and bass boost（等化器與重低音）**:
-  - Adjust bass boost with `/bassboost`, from +4 dB to +20 dB.
-  - Use `/filter` to select sound presets, including Rock, Pop, Clear Vocal, Crisp Treble, Nightcore, Vaporwave, and 8D.
-
-- **Modern UI & Interactive Controls（現代化視覺介面與全能控制器）**:
-  - **Dynamic Scrubber Progress Bar**: 即時動態時間軸進度條（`01:23 ━━━━━━🔘─────── 04:29`），精確換算暫停與播放時長。
-  - **Platform Badge & Color Accent**: 根據歌曲來源（Spotify, Netease, Apple Music, YouTube, SoundCloud）自動變更卡片主題色與標籤。
-  - **10-Button Dual-Row Controller**: 提供播放/暫停、上一首重播、跳過、循環模式、停止退出、即時音量微調 (`🔉 -10%` / `🔊 +10%`)、電台接歌開關、一鍵歌詞視窗、以及即時隊列檢視。
-  - **Cluster Status Dashboard**: 視覺化叢集負載條（`▰▰▰▱▱`）、各節點即時播放進度，以及未進群機器人的一鍵邀請鈕。
-
-- **Resource usage（資源使用量）**:
-  - The project targets roughly 70–120 MB of RAM for all five bots combined. Actual usage depends on the workload and environment.
+> 💡 **How Multi-Room Dispatch Works**:
+> When someone runs `/play` in any voice room, the dispatcher checks who is already in that channel. If none of the bots are in that room yet, it automatically grabs an idle bot and joins. If all 5 bots are invited to your server, up to 5 voice rooms can listen to completely different music at the same time.
 
 ---
 
-## Slash Commands Reference / 斜線指令一覽
+## Features
 
-| Command (指令) | Parameters (參數) | Description (EN) | 說明 (繁體中文) |
+- **Multi-Room Clustering**: Run up to 5 bots under a single process or game panel. Each voice room gets its own independent queue, volume, loop setting, audio filters, and progress tracker.
+- **Dual-Engine Audio Pipeline**:
+  - **Lavalink v4**: Connects to an external Lavalink node for high-throughput Opus passthrough and real-time DSP equalizers.
+  - **Native FFmpeg Engine**: Runs natively without extra server software. Includes a dynamic ring buffer (`BufferedAudioSource`), custom stream headers to bypass YouTube 403 errors, and CPU thread capping (`-threads 1`).
+- **Multi-Platform Support**: Paste links directly from YouTube, SoundCloud, Spotify (tracks, albums, playlists), Apple Music, and NetEase Cloud Music (including `163cn.tv` shortlinks).
+- **Smooth Audio Streaming**: Decouples audio decoding from Discord voice transmission using a 5-second ring buffer to prevent playback jitter, sudden fast-forwarding, or audio dropouts.
+- **Full Queue & Playback Control**: Jump to specific timestamps with `/seek`, randomize the queue with `/shuffle`, drop unwanted tracks with `/remove`, or wipe the list with `/clear`.
+- **Interactive Controller UI**: Real-time progress bar (`01:23 ━━━━━━🔘─────── 04:29`), platform-themed embed cards, and a 10-button controller for volume adjustments, seeking, looping, and lyrics.
+- **Synchronized Lyrics**: Fetch synchronized or plain-text lyrics on the fly via LRCLIB and NetEase without needing third-party API keys.
+- **Server Settings Persistence**: Volume levels, language preferences, 24/7 mode, bass boost, and audio filters are saved per-server in `guild_settings.json` and persist across bot reboots.
+- **Smart Autoplay**: Enable `/autoplay` to keep the music playing with stylistic recommendations once the queue finishes.
+- **Multilingual Support**: Supports English, Traditional Chinese, Simplified Chinese, Japanese, Korean, and Spanish. Automatically detects each user's client locale.
+- **Lightweight Footprint**: Typically runs within 80–120 MB RAM even with all 5 nodes active.
+
+---
+
+## Slash Commands
+
+| Command | Arguments | Description | 說明 (繁體中文) |
 | :--- | :--- | :--- | :--- |
-| **/help** | *None* | Modern interactive manual with command categories | 查看現代化分類指令使用指南 |
-| **/play** | `query`, `[bot_id]` | Smart play (Auto-dispatches idle bot or targeted bot 1~5) | 點歌（自動分配可用機器人，也可指定 1～5 號） |
+| **/help** | *None* | Interactive manual categorized by features | 查看現代化分類指令使用指南 |
+| **/play** | `query`, `[bot_id]` | Play a track or playlist (auto-dispatches an idle bot or targeted bot 1~5) | 點歌（自動分配空閒機器人，亦可指定 1～5 號） |
+| **/seek** | `time` | Fast-forward or jump to a timestamp (e.g. `90` or `01:30`) | 精確跳轉當前歌曲播放進度 (支援秒數或分:秒) |
+| **/shuffle** | *None* | Randomly shuffle all upcoming songs in the queue | 隨機打亂當前語音房的待播歌單順序 |
+| **/remove** | `index` | Remove a specific track from the queue by its number | 移除待播清單中的指定序號歌曲 |
+| **/clear** | *None* | Clear all upcoming songs from the queue | 一鍵清空當前語音房所有的待播歌曲 |
+| **/history** | *None* | View the last 15 songs played in this room | 檢視最近播放過的歷史歌曲紀錄 |
+| **/nowplaying**| *None* | Show track details, progress bar, and interactive buttons | 查看目前歌曲、即時進度條與控制器 |
+| **/queue** | *None* | Show the upcoming track queue for your room | 查看你所在語音房的待播歌單隊列 |
+| **/skip** | *None* | Skip the track currently playing in your room | 跳過你當前語音房的歌曲 |
+| **/stop** | `[force_all]` | Stop playback and disconnect the bot (or stop all bots) | 停止播放並退出語音房（或強制全部退出） |
 | **/autoplay** | *None* | Toggle smart autoplay radio mode when queue ends | 切換自動接歌模式 (歌單結束自動接續播放) |
-| **/lyrics** | `[song]` | View synced or plain lyrics for current / queried song | 查詢當前或指定歌曲的動態/純文字即時歌詞 |
-| **/seek** | `time` | Fast-seek to timestamp in seconds or mm:ss format | 精確跳轉當前歌曲播放進度 (支援秒數或分:秒) |
-| **/shuffle** | *None* | Randomly shuffle upcoming songs in the queue | 隨機打亂當前語音房的待播歌單隊列 |
-| **/remove** | `index` | Remove specific song by index from upcoming queue | 移除待播清單中的指定序號歌曲 |
-| **/clear** | *None* | Clear all upcoming songs in current queue | 一鍵清空當前語音房所有的待播歌曲 |
-| **/history** | *None* | View recent playback history (last 15 tracks) | 檢視最近播放過的歷史歌曲紀錄 |
-| **/247** | *None* | Toggle 24/7 permanent stay-in-room mode | 切換 24/7 永久常駐語音房模式 |
-| **/language** | `language` | Set server default language (en / zh-TW / ja / ko / es) | 設定伺服器預設語言 |
-| **/status** | *None* | Live cluster dashboard for all 5 bot nodes | 查看各機器人的連線狀態、所在語音房與分流資訊 |
-| **/nowplaying**| *None* | View track details, bitrate, engine & interactive controller | 查看目前歌曲、位元率及互動控制器 |
-| **/queue** | *None* | View upcoming queued songs in your voice room | 查看你所在語音房的待播歌單隊列 |
-| **/skip** | *None* | Skip currently playing song in your room | 跳過你當前語音房的歌曲 |
-| **/stop** | `[force_all]` | Stop playback and leave voice room (or force-stop all bots) | 停止播放並退出語音房（或強制全部退出） |
-| **/bassboost** | `level` | Adjust real-time Bass Boost (Off / Low / Medium / High / Extreme) | 調整重低音增強程度 |
-| **/filter** | `preset` | Apply audio filters (Rock / Pop / Vocal / Nightcore / 8D / etc.) | 套用音效濾鏡 (搖滾/夜核/8D等) |
-| **/bitrate** | `[kbps]` | Maximize voice channel bitrate up to 384kbps | 查看或調整目前語音房的位元率 |
-| **/engine** | *None* | View Dual-Engine (Lavalink v4 / Native) real-time diagnostics | 查看雙引擎架構即時運作狀態與音訊規格 |
+| **/lyrics** | `[song]` | Look up synced or plain lyrics for current or queried track | 查詢當前或指定歌曲的動態/純文字歌詞 |
+| **/bassboost** | `level` | Adjust bass boost (+4dB to +20dB) | 調整重低音增強強度 |
+| **/filter** | `preset` | Apply audio filters (Rock, Pop, Vocal, Nightcore, 8D, etc.) | 套用等化器音效濾鏡 (搖滾/夜核/8D等) |
+| **/bitrate** | `[kbps]` | Maximize the voice channel bitrate up to 384kbps | 查看或調整目前語音房的位元率 |
+| **/status** | *None* | Live cluster dashboard for all 5 bot nodes | 查看各機器人的連線狀態、所在房間與負載 |
+| **/247** | *None* | Toggle 24/7 permanent room presence | 切換 24/7 永久常駐語音房模式 |
+| **/language** | `language` | Set server default language (en / zh-TW / zh-CN / ja / ko / es) | 設定伺服器預設語言 |
+| **/engine** | *None* | View real-time audio pipeline and engine diagnostics | 查看雙引擎架構即時運作狀態與音訊規格 |
 
 ---
 
-## Quick Start / 快速開始
+## Quick Start
 
-### Option 1: Run with Python Locally (本機或 VPS 部署)
+### 1. Run with Python (Local or VPS)
 
-1. **Clone repository & install dependencies**:
+1. **Clone the repository and install dependencies**:
    ```bash
    git clone https://github.com/asian0626/DJ-Donut.git
    cd DJ-Donut
    pip install -r requirements.txt
    ```
    *Make sure `ffmpeg` is installed on your system:*
-   - Ubuntu / Debian: `sudo apt update && sudo apt install -y ffmpeg`
-   - macOS: `brew install ffmpeg`
-   - Windows: Download from [gyan.dev](https://www.gyan.dev/ffmpeg/builds/) and add to PATH.
+   - **Ubuntu / Debian**: `sudo apt update && sudo apt install -y ffmpeg`
+   - **macOS**: `brew install ffmpeg`
+   - **Windows**: Download from [gyan.dev](https://www.gyan.dev/ffmpeg/builds/) and add to your PATH.
 
-2. **Configure Environment Variables**:
-   Copy `.env.example` to `.env`:
+2. **Configure your tokens**:
    ```bash
    cp .env.example .env
    ```
-   Edit `.env` and fill in your Discord Bot Token(s):
+   Open `.env` and fill in your Discord Bot token(s):
    ```env
    BOT_TOKEN_1=your_first_bot_token_here
    BOT_TOKEN_2=your_second_bot_token_here
-   ...
+   # Add up to BOT_TOKEN_5 if you want all 5 nodes
    ```
-   *(Configure as many tokens as you want from 1 to 5; the system automatically starts that many bots!)*
 
-3. **Start the Bot Cluster**:
+3. **Start the cluster**:
    ```bash
    python3 main.py
    ```
 
 ---
 
-### Option 2: Run with Docker / Docker Compose (容器化部署)
+### 2. Run with Docker Compose
 
-1. **Configure `.env`**:
+1. Set up your `.env`:
    ```bash
    cp .env.example .env
-   # Edit .env with your bot tokens
+   # Add your BOT_TOKEN_1 ~ BOT_TOKEN_5
    ```
 
-2. **Start with Docker Compose**:
+2. Launch the container:
    ```bash
    docker compose up -d --build
    ```
-   *Logs can be viewed with:*
+
+3. Check logs:
    ```bash
    docker compose logs -f
    ```
 
 ---
 
-### Option 3: Pterodactyl Panel (翼龍面板單一進程部署)
+### 3. Pterodactyl Game Panel
 
-1. Download or git-clone this repository into your Pterodactyl server root folder.
-2. Ensure your server image is **Python 3.10 / 3.11 / 3.12** with FFmpeg pre-installed.
-3. Configure your tokens in `.env`.
+1. Upload or git-clone the repo directly into your Pterodactyl server root folder.
+2. Ensure your egg is using a **Python 3.10, 3.11, or 3.12** image with FFmpeg installed.
+3. Add your tokens to `.env`.
 4. Set the startup command to:
    ```bash
    python3 main.py
    ```
-   *(or `python3 bot.py`)*
-5. Click **Start**! All configured bots will log in simultaneously under that single panel process.
+5. Click **Start**. All configured bot tokens will log in together within that single panel container.
 
 ---
 
-## Audio Settings / 音訊設定
+## Audio Troubleshooting
 
-If playback sounds muffled or the bass is weak, check these Discord settings:
+If audio sounds muffled, muddy, or quiet, it is almost always due to Discord's built-in noise suppression filtering out music frequencies.
 
-### 1. Check Discord noise suppression
-Discord’s noise suppression is designed for voice chat and may filter parts of music, such as drums, bass, or reverb.
-- **Desktop (PC/Mac)**:
-  1. Click **User Settings (Gear)** -> **Voice & Video**.
-  2. Scroll to **Noise Suppression** -> Select **None** (Turn off Krisp).
-  3. Turn off **Echo Cancellation** and **Advanced Voice Activity**.
-- **Mobile (iOS/Android)**:
-  Inside the voice room, swipe up and turn off **Noise Suppression**.
+### 1. Disable Krisp Noise Suppression
+Discord's noise gate is tuned for human speech and treats heavy bass, synth, or drums as background noise.
+- **Desktop (PC / Mac)**:
+  1. Open **User Settings** (gear icon) -> **Voice & Video**.
+  2. Under **Noise Suppression**, select **None** (turn off Krisp).
+  3. Turn off **Echo Cancellation** if music still cuts in and out.
+- **Mobile (iOS / Android)**:
+  Swipe up while connected to the voice room and toggle off **Noise Suppression**.
 
-### 2. Adjust the channel bitrate (`/bitrate`)
-Voice-channel bitrate depends on the server and channel settings. Run `/bitrate` if supported, or ask a server administrator to adjust the channel bitrate.
+### 2. Maximize Room Bitrate (`/bitrate`)
+Discord defaults new voice channels to 64 kbps. Run `/bitrate` while in your voice room to immediately raise the channel to your server's maximum allowable rate (up to 384 kbps for boosted servers).
 
 ---
 
-## Tech Stack & Architecture
+## Architecture
 
 ```mermaid
 flowchart TD
@@ -209,77 +178,60 @@ flowchart TD
     
     subgraph "Dual-Engine Audio Pipeline"
         Engine{"Engine Selector"}
-        Engine -->|Lavalink v4 Available| LV4["Lavalink v4 Node<br/>(Opus Direct Passthrough + 32-bit DSP)"]
-        Engine -->|Native Fallback| FFmpeg["FFmpeg Studio Engine<br/>(384k VBR, Anti-403, 16MB Prebuffer)"]
+        Engine -->|Lavalink Available| LV4["Lavalink v4 Node<br/>(Opus Direct Passthrough + 32-bit DSP)"]
+        Engine -->|Native Fallback| FFmpeg["FFmpeg Engine<br/>(384k VBR, Anti-403, 5s Dynamic Ring Buffer)"]
     end
     
     LV4 --> Voice["Discord Voice Room (Stereo 48kHz)"]
     FFmpeg --> Voice
 ```
 
-- **Runtime**: Python 3.11+ asyncio event loop
-- **Discord API**: `discord.py` 2.7+ with voice and application slash command tree
-- **Audio Engines**: Lavalink v4 (Wavelink 3.4+) & FFmpeg Studio Transcoder
-- **Extractor**: `yt-dlp` (Opus direct stream selector + Android/Web client bypass headers)
-- **Lyrics Engine**: LRCLIB synchronized API + Netease fallback
-- **i18n**: Built-in 6-language locale resolver (`en`, `zh-TW`, `zh-CN`, `ja`, `ko`, `es`)
+- **Runtime**: Python 3.11+ asyncio
+- **Discord Library**: `discord.py` 2.7+ with application slash command tree
+- **Audio Engines**: Lavalink v4 (Wavelink 3.4+) & Native FFmpeg Transcoder
+- **Extractor**: `yt-dlp` with thread-local caching and adaptive user-agents
+- **Lyrics Engine**: LRCLIB (synced) & NetEase (plain fallback)
+- **i18n**: Built-in 6-language locale detection (`en`, `zh-TW`, `zh-CN`, `ja`, `ko`, `es`)
 
 ---
 
-## Release Notes / 更新日誌
+## Changelog
 
 ### v1.1.0 (2026-10-15)
-- ⚡ **專屬多執行緒媒體排程引擎 (`MEDIA_EXECUTOR`)**：
-  - 導入 10 組 Worker 的獨立執行緒池，徹底隔離 CPU 與網路繁重的外部解析任務（Spotify, Apple Music, 網易雲, yt-dlp, 動態歌詞等）。
-  - 保證 Discord 主事件循環（asyncio Event Loop）零延遲，即使 5 隻機器人同時大量點播解析也不會造成語音中斷或按鈕卡頓。
-- 🧠 **執行緒本地 yt-dlp 實例快取 (`threading.local`)**：
-  - 採用 `get_thread_ytdl()` 機制複用各 Worker 執行緒的 `YoutubeDL` 實例，消弭頻繁重複建構解析器之記憶體震盪與 CPU 開銷，大幅縮短 40% 以上點歌反應時間。
-- ⚡ **音訊串流記憶體快取 (`STREAM_CACHE`)**：
-  - 實作具備 30 分鐘 TTL 與上限 500 首之執行緒安全串流記憶體快取，重複播放相同歌曲或執行進度跳轉時毫秒級秒開。
-- 📑 **全方位隊列進階管理指令**：
-  - **/seek**：支援以秒數或 `分:秒`（如 `01:30`）精準跳轉當前歌曲播放進度，FFmpeg 關鍵幀極速 seek 搭配 Seeking Guard 防中斷機制。
-  - **/shuffle**：隨機打亂當前語音房的待播歌單隊列順序。
-  - **/remove**：依隊列序號精確移除待播清單中的指定歌曲。
-  - **/clear**：一鍵清空當前房間所有的待播歌曲隊列。
-  - **/history**：檢視當前語音房最近播放過的 15 首歷史歌曲紀錄與點歌者。
-- 🛡️ **連續解析失敗熔斷與自動修復**：
-  - 串流提取遭遇網路重設（Connection Reset）時提供自適應回退重試機制。
-  - 當遇到連續 5 首無效/受版權限制音源時，主動熔斷暫停播放並發送提醒，徹底避免機器人陷入無限死循環。
-  - 為 `BufferedAudioSource` 實作資源析構釋放 (`__del__`)，確保跳歌或切換時背景解碼執行緒立即安全退出。
-- 💾 **伺服器偏好設定持久化保存 (`guild_settings.json`)**：
-  - 跨重啟自動持久化記憶各伺服器設定，包含：播放音量、預設語言、24/7 常駐模式、重低音增強等級、等化器濾鏡以及電台自動接歌開關。
+- **Dedicated Media Worker Pool**: Offloaded Spotify, NetEase, Apple Music, and yt-dlp metadata extraction to a 10-worker `ThreadPoolExecutor`, preventing the main asyncio event loop from stalling during heavy track resolution.
+- **Extractor Caching**: Added thread-local `YoutubeDL` instances (`threading.local`) and a 30-minute in-memory stream URL cache to cut query resolution times and reduce memory allocations.
+- **Queue Controls**: Added `/seek` (timestamp seeking in seconds or `mm:ss`), `/shuffle` (randomize current queue), `/remove` (delete track by index), `/clear` (wipe upcoming queue), and `/history` (view recently played tracks).
+- **Auto-Recovery & Failure Breaker**: Added exponential backoff retries on broken stream connections, and an automatic circuit-breaker that pauses playback after 5 consecutive resolution failures to prevent infinite skip loops.
+- **Settings Persistence**: Guild settings (default volume, language, 24/7 permanence, bass boost level, and audio filter) now save to `guild_settings.json` and persist across bot restarts.
+- **Cleaner Shutdowns**: Implemented `__del__` cleanup on `BufferedAudioSource` to guarantee background reader threads and audio buffers terminate promptly when skipping or stopping tracks.
 
 ### v1.0.5 (2026-10-15)
-- 🚀 **徹底消除播放忽快忽慢與卡頓（加快/慢半拍）**：
-  - **導入 5 秒動態音訊環形緩衝區 (`BufferedAudioSource`)**：以獨立背景執行緒預先解碼並快取 5 秒音訊（250 幀），解耦即時播放與網路拉流，徹底消除網路微延遲導致的 Discord WebRTC 自動快轉（加快）與掉拍卡頓（慢半拍）。
-  - **重構 YouTube 串流客戶端與標頭**：改用穩定之 `tv` / `web` / `ios` 客戶端架構，移除引發嚴格限速（50KB/s）與中斷的 `android` 標籤，並注入完整瀏覽器請求標頭。
-  - **優化 FFmpeg 串流握手參數**：啟用 `-http_persistent 0` 杜絕長連線閒置中斷，縮減斷線重連間隔至 2 秒，擴增分析時長（`analyzeduration 1000000` / `probesize 256k`）確保精準時鐘同步與取樣率對齊。
+- **Eliminated Audio Stutter & Speed Jumps**:
+  - Implemented `BufferedAudioSource`, a 5-second dynamic ring buffer running on a separate worker thread to decouple network fetching from real-time Discord voice playback.
+  - Replaced unstable YouTube clients with reliable `tv` and `web` player profiles, avoiding aggressive 50KB/s download throttling and sudden stream resets.
+  - Tweaked FFmpeg stream options: set `-http_persistent 0` to avoid dead connections and extended probe durations (`analyzeduration 1000000`, `probesize 256k`) to prevent clock drift.
 
 ### v1.0.4 (2026-10-14)
-- 🎨 **全新現代化播放介面**：導入高解析度動態時間軸進度條（Scrubber Bar）、多平台識別色彩（Spotify, Apple Music, 網易雲等）與沉浸式卡片排版。
-- 🎛️ **雙排十鍵全能互動控制器**：升級為兩排 10 顆互動按鈕，支援免中斷音訊即時微調音量 (`-10%` / `+10%`)、一鍵查詢歌詞、隨選隊列、重播、單曲/歌單循環與電台接歌。
-- 📊 **叢集儀表板與狀態視覺化**：重構 `/status` 導入叢集總負載指示條（`▰▰▰▱▱`）、即時播放進度、以及未加入伺服器節點的一鍵邀請連結。
-- 📖 **新增現代化幫助指南 (`/help`)**：提供精美結構化分類指南，快速掌握所有播放、音效與管理指令。
+- **Modernized Player Interface**: Added a dynamic scrubber bar (`01:23 ━━━━━━🔘─────── 04:29`), platform-themed color accents, and cleaner embed formatting.
+- **10-Button Dual-Row Controller**: Replaced basic buttons with a compact dual-row controller supporting live volume adjustments (`-10%` / `+10%`), instant lyrics, queue views, replay, and loop mode toggling.
+- **Cluster Status Dashboard**: Added `/status` dashboard showing active rooms, per-node playback info, and direct OAuth2 invite links for any offline or missing bots.
+- **Interactive Help Menu**: Added `/help` command categorizing all playback, audio, and queue controls.
 
 ### v1.0.3 (2026-10-14)
-- 🎵 **新增網易雲音樂支援**：全面支援網易雲單曲、歌單、專輯及官方短網址（`163cn.tv` / `163.lu`）直貼播放，免額外 API Key 即時解析。
-- 🍎 **新增 Apple Music 支援**：支援 Apple Music 單曲、專輯與公開精選歌單（`music.apple.com` / `apple.co`），自動擷取高畫質封面與音軌清單。
-- ⚡ **統一多平台解析管線**：重構 Spotify、網易雲與 Apple Music 的解析調度管線，支援最大 200 首曲目整單極速入列與串流派發。
+- **NetEase Cloud Music Support**: Added direct support for NetEase songs, playlists, albums, and short URLs (`163cn.tv` / `163.lu`).
+- **Apple Music Support**: Added metadata resolution for Apple Music song, playlist, and album links (`music.apple.com` / `apple.co`).
+- **Batch Resolution**: Streamlined track importing for third-party playlists, queuing up to 200 songs smoothly.
 
 ### v1.0.2 (2026-10-14)
-- 🐛 **修復變數作用域異常**：解決 `/play` 指令中變數命名衝突引發的 `UnboundLocalError`，大幅提升點歌流程穩定度。
-- ⚡ **Spotify 快取效能升級**：改用 `MemoryCacheHandler` 記憶體快取處理器，徹底消除無權限環境下的 `.cache` 磁碟寫入警告。
-- 🤖 **實作機器人權限完善**：全數 1～5 號機器人節點邀請連結統一配置管理員權限 (`permissions=8`)。
-- 🧹 **極簡純化架構**：徹底剔除內部冗餘註解與除錯資訊，減輕運算開銷並提升執行效率。
-- 🌐 **國際化語系偵測**：支援 6 種語言智慧解析，各房間即時狀態面板新增版本號標註。
+- **Fixed Variable Scope Bug**: Resolved an `UnboundLocalError` in `/play` caused by shadowed variable names.
+- **In-Memory Spotify Token Cache**: Switched to `MemoryCacheHandler` to prevent file permission errors on read-only hosting environments.
+- **Permission Cleanup**: Updated OAuth2 invite links to request administrator permissions (`permissions=8`) to prevent channel permission issues.
 
 ---
 
-## Support & Feedback / 問題回饋與優化方案
+## Support & Feedback
 
-若在使用過程中有任何問題、故障回報或效能優化方案，歡迎隨時聯絡：
+If you encounter any bugs, playback issues, or have suggestions:
 
-- **電子郵件 (Email)**: [ian986260903@a1365.pro](mailto:ian986260903@a1365.pro)
-- **GitHub Issues**: [提交 Issue / 功能建議](https://github.com/asian0626/DJ-Donut/issues)
-
----
+- **Email**: [ian986260903@a1365.pro](mailto:ian986260903@a1365.pro)
+- **GitHub Issues**: [Open an Issue / Feature Request](https://github.com/asian0626/DJ-Donut/issues)
