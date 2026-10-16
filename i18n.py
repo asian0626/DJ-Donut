@@ -503,6 +503,142 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         'ja': '🔊 【{bot_name}】 音量を **{vol}%** に設定しました',
         'ko': '🔊 【{bot_name}】 볼륨이 **{vol}%** 로 설정되었습니다',
         'es': '🔊 【{bot_name}】 ¡Volumen establecido en: **{vol}%**!'
+    },
+    'shuffle_need_more': {
+        'en': '❌ At least 2 songs in the queue are required to shuffle!',
+        'zh-TW': '❌ 待播隊列中至少需要有 2 首歌曲才能進行隨機打亂！',
+        'zh-CN': '❌ 待播队列中至少需要有 2 首歌曲才能进行随机打乱！',
+        'ja': '❌ シャッフルするにはキューに少なくとも2曲必要です！',
+        'ko': '❌ 셔플하려면 대기열에 최소 2곡이 필요합니다!',
+        'es': '❌ ¡Se necesitan al menos 2 canciones en la cola para mezclar!'
+    },
+    'shuffle_success': {
+        'en': '🔀 Successfully shuffled queue! Total **{count}** songs reordered.',
+        'zh-TW': '🔀 已成功打亂待播隊列！共 **{count}** 首歌曲已重新排序。',
+        'zh-CN': '🔀 已成功打乱待播队列！共 **{count}** 首歌曲已重新排序。',
+        'ja': '🔀 キューをシャッフルしました！全 **{count}** 曲が並び替えられました。',
+        'ko': '🔀 대기열을 셔플했습니다! 총 **{count}** 곡의 순서가 변경되었습니다.',
+        'es': '🔀 ¡Cola mezclada con éxito! Total de **{count}** canciones reordenadas.'
+    },
+    'queue_empty': {
+        'en': '❌ The queue is currently empty!',
+        'zh-TW': '❌ 待播隊列目前為空！',
+        'zh-CN': '❌ 待播队列当前为空！',
+        'ja': '❌ 現在の再生待ちキューは空です！',
+        'ko': '❌ 현재 대기열이 비어 있습니다!',
+        'es': '❌ ¡La cola de reproducción está vacía!'
+    },
+    'remove_invalid_index': {
+        'en': '❌ Invalid song index! Please enter a number between 1 and {max_idx}.',
+        'zh-TW': '❌ 無效的歌曲序號！請輸入 1 ~ {max_idx} 之間的數字。',
+        'zh-CN': '❌ 无效的歌曲序号！请输入 1 ~ {max_idx} 之间的数字。',
+        'ja': '❌ 無効な曲番号です！1 から {max_idx} の数字を入力してください。',
+        'ko': '❌ 잘못된 곡 번호입니다! 1 에서 {max_idx} 사이의 숫자를 입력하세요.',
+        'es': '❌ ¡Número de canción no válido! Introduce un número entre 1 y {max_idx}.'
+    },
+    'remove_success': {
+        'en': '🗑️ Removed #{index} from queue: **{title}**',
+        'zh-TW': '🗑️ 已從待播隊列移除第 **{index}** 首：**{title}**',
+        'zh-CN': '🗑️ 已从待播队列移除第 **{index}** 首：**{title}**',
+        'ja': '🗑️ キューから #{index} を削除しました：**{title}**',
+        'ko': '🗑️ 대기열에서 #{index} 번 곡을 삭제했습니다: **{title}**',
+        'es': '🗑️ Eliminada de la cola la pista #{index}: **{title}**'
+    },
+    'clear_success': {
+        'en': '🧹 Cleared all **{count}** songs from queue!',
+        'zh-TW': '🧹 已清空待播隊列中所有的 **{count}** 首歌曲！',
+        'zh-CN': '🧹 已清空待播队列中所有的 **{count}** 首歌曲！',
+        'ja': '🧹 再生待ちキュー内の全 **{count}** 曲をクリアしました！',
+        'ko': '🧹 대기열의 모든 **{count}** 곡을 비웠습니다!',
+        'es': '🧹 ¡Se han limpiado todas las **{count}** canciones de la cola!'
+    },
+    'history_empty': {
+        'en': '📜 Playback history is currently empty!',
+        'zh-TW': '📜 播放歷史紀錄目前為空！',
+        'zh-CN': '📜 播放历史记录当前为空！',
+        'ja': '📜 再生履歴は現在空です！',
+        'ko': '📜 재생 기록이 비어 있습니다!',
+        'es': '📜 ¡El historial de reproducción está vacío!'
+    },
+    'seek_success': {
+        'en': '⏩ Successfully jumped to **{time_str}**!',
+        'zh-TW': '⏩ 已成功跳轉至 **{time_str}**！',
+        'zh-CN': '⏩ 已成功跳转至 **{time_str}**！',
+        'ja': '⏩ **{time_str}** にジャンプしました！',
+        'ko': '⏩ **{time_str}** 로 성공적으로 이동했습니다!',
+        'es': '⏩ ¡Saltado con éxito a **{time_str}**!'
+    },
+    'seek_invalid_time': {
+        'en': '❌ Invalid time format! Use seconds (e.g. 90) or mm:ss (e.g. 01:30).',
+        'zh-TW': '❌ 無效的時間格式！請使用秒數 (如 90) 或 分:秒 (如 01:30)。',
+        'zh-CN': '❌ 无效的时间格式！请使用秒数 (如 90) 或 分:秒 (如 01:30)。',
+        'ja': '❌ 無効な時間形式です！秒数（例: 90）または mm:ss（例: 01:30）を使用してください。',
+        'ko': '❌ 유효하지 않은 시간 형식입니다! 초 (예: 90) 또는 분:초 (예: 01:30) 를 사용하세요.',
+        'es': '❌ ¡Formato de tiempo no válido! Usa segundos (ej. 90) o mm:ss (ej. 01:30).'
+    },
+    'seek_exceed_duration': {
+        'en': '❌ Seek time exceeds song duration ({duration})!',
+        'zh-TW': '❌ 跳轉時間超過歌曲長度 ({duration})！',
+        'zh-CN': '❌ 跳转时间超过歌曲长度 ({duration})！',
+        'ja': '❌ シーク時間が曲の長さ（{duration}）を超えています！',
+        'ko': '❌ 이동 시간이 곡 길이 ({duration}) 를 초과합니다!',
+        'es': '❌ ¡El tiempo de búsqueda excede la duración de la canción ({duration})!'
+    },
+    'dj_permission_denied': {
+        'en': '❌ This action is restricted to DJ role <@&{role_id}> or server administrators!',
+        'zh-TW': '❌ 此操作目前僅限擁有 DJ 身分組 <@&{role_id}> 或管理員使用！',
+        'zh-CN': '❌ 此操作目前仅限拥有 DJ 身份组 <@&{role_id}> 或管理员使用！',
+        'ja': '❌ この操作は現在 DJ ロール <@&{role_id}> またはサーバー管理者のみ利用可能です！',
+        'ko': '❌ 이 작업은 현재 DJ 역할 <@&{role_id}> 또는 서버 관리자만 사용할 수 있습니다!',
+        'es': '❌ ¡Esta acción está restringida al rol DJ <@&{role_id}> o administradores!'
+    },
+    'dj_role_set': {
+        'en': '🎧 Successfully set server DJ role to: {role}',
+        'zh-TW': '🎧 已成功將 DJ 身分組設定為：{role}',
+        'zh-CN': '🎧 已成功将 DJ 身份组设置为：{role}',
+        'ja': '🎧 DJ ロールを正常に設定しました: {role}',
+        'ko': '🎧 DJ 역할을 성공적으로 설정했습니다: {role}',
+        'es': '🎧 Rol de DJ establecido con éxito en: {role}'
+    },
+    'dj_role_removed': {
+        'en': '🎧 Successfully cleared DJ role restriction!',
+        'zh-TW': '🎧 已清除伺服器 DJ 身分組限制！',
+        'zh-CN': '🎧 已清除服务器 DJ 身份组限制！',
+        'ja': '🎧 DJ ロールの制限を解除しました！',
+        'ko': '🎧 DJ 역할 제한이 해제되었습니다!',
+        'es': '🎧 ¡Se ha eliminado la restricción de rol de DJ!'
+    },
+    'move_success': {
+        'en': '↕️ Successfully moved song #{src} to position #{dst}!',
+        'zh-TW': '↕️ 已將第 **{src}** 首歌曲移動至第 **{dst}** 位！',
+        'zh-CN': '↕️ 已将第 **{src}** 首歌曲移动至第 **{dst}** 位！',
+        'ja': '↕️ 曲 #{src} を位置 #{dst} に移動しました！',
+        'ko': '↕️ #{src} 번 곡을 #{dst} 번 위치로 이동했습니다!',
+        'es': '↕️ ¡Canción #{src} movida con éxito a la posición #{dst}!'
+    },
+    'move_invalid_range': {
+        'en': '❌ Invalid move range! Please enter numbers within 1 ~ {max_idx}.',
+        'zh-TW': '❌ 無效的移動位置！請輸入 1 ~ {max_idx} 範圍內的數字。',
+        'zh-CN': '❌ 无效的移动位置！请输入 1 ~ {max_idx} 范围内的数字。',
+        'ja': '❌ 移動位置が無効です！1 〜 {max_idx} の範囲で入力してください。',
+        'ko': '❌ 잘못된 이동 위치입니다! 1 ~ {max_idx} 범위의 숫자를 입력하세요.',
+        'es': '❌ ¡Rango de movimiento no válido! Introduce números entre 1 y {max_idx}.'
+    },
+    'replay_invalid_index': {
+        'en': '❌ Invalid history song index! Please check `/history`.',
+        'zh-TW': '❌ 無效的歷史歌曲編號！請透過 `/history` 查詢。',
+        'zh-CN': '❌ 无效的历史歌曲编号！请通过 `/history` 查询。',
+        'ja': '❌ 無効な履歴曲番号です！`/history` で確認してください。',
+        'ko': '❌ 잘못된 기록 곡 번호입니다! `/history` 를 확인하세요.',
+        'es': '❌ ¡Número de canción en el historial no válido! Consulta `/history`.'
+    },
+    'stream_consecutive_failed': {
+        'en': '⚠️ Detected 5 consecutive playback failures. Playback paused automatically to prevent recursion loops.',
+        'zh-TW': '⚠️ 檢測到連續 5 首歌曲解析失敗，已自動暫停播放以防止循環異常。',
+        'zh-CN': '⚠️ 检测到连续 5 首歌曲解析失败，已自动暂停播放以防止循环异常。',
+        'ja': '⚠️ 連続5曲の解析に失敗しました。ループ防止のため自動一時停止しました。',
+        'ko': '⚠️ 연속 5곡 재생 실패를 감지했습니다. 무한 루프를 방지하기 위해 자동으로 일시 중지되었습니다.',
+        'es': '⚠️ Se detectaron 5 fallos consecutivos de reproducción. Pausa automática para prevenir bucles.'
     }
 }
 

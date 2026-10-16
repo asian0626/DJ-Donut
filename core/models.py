@@ -67,6 +67,12 @@ class BufferedAudioSource(discord.AudioSource):
                 return b''
             return bytes(3840)
 
+    def __del__(self):
+        try:
+            self.cleanup()
+        except Exception:
+            pass
+
     def cleanup(self):
         self._stop_event.set()
         try:
@@ -78,7 +84,10 @@ class BufferedAudioSource(discord.AudioSource):
         except Exception:
             pass
         if hasattr(self.source, 'cleanup') and callable(self.source.cleanup):
-            self.source.cleanup()
+            try:
+                self.source.cleanup()
+            except Exception:
+                pass
 
 class Song:
     def __init__(self, data: Optional[dict], requester: discord.Member, wavelink_track=None):
@@ -107,7 +116,7 @@ class GuildMusicState:
     def __init__(self, guild_id: int):
         self.guild_id = guild_id
         self.queue = deque()
-        self.history = deque(maxlen=30)
+        self.history = deque(maxlen=50)
         self.current: Optional[Song] = None
         self.last_played: Optional[Song] = None
         self.loop_mode: str = 'off'
@@ -127,8 +136,28 @@ class GuildMusicState:
         self.is_seeking: bool = False
         self.dj_role_id: Optional[int] = None
         self.current_view: Optional[discord.ui.View] = None
+        self.progress_task: Optional[asyncio.Task] = None
+        self.nowplaying_message: Optional[discord.Message] = None
         self.last_active: float = time.time()
         self.load_persisted_settings()
+
+    def cancel_progress_task(self):
+        if self.progress_task and not self.progress_task.done():
+            self.progress_task.cancel()
+            self.progress_task = None
+
+    def cleanup(self):
+        self.cancel_progress_task()
+        if self.current_view:
+            try:
+                self.current_view.stop()
+            except Exception:
+                pass
+            self.current_view = None
+        self.nowplaying_message = None
+        self.queue.clear()
+        self.current = None
+        self.is_playing = False
 
     def load_persisted_settings(self):
         data = load_all_guild_settings().get(str(self.guild_id), {})
@@ -249,6 +278,8 @@ def has_dj_permission(interaction: discord.Interaction, state: 'GuildMusicState'
     if hasattr(interaction.user, 'guild_permissions') and interaction.user.guild_permissions.administrator:
         return True
     if hasattr(interaction.user, 'roles') and any(r.id == state.dj_role_id for r in interaction.user.roles):
+        return True
+    if state.current and getattr(state.current, 'requester', None) and state.current.requester.id == interaction.user.id:
         return True
     vc = interaction.guild.voice_client if interaction.guild else None
     if vc and hasattr(vc, 'channel') and vc.channel:

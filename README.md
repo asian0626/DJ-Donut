@@ -2,7 +2,7 @@
 
 <div align="center">
 
-![Version](https://img.shields.io/badge/Version-v1.4.0-blue?logo=git)
+![Version](https://img.shields.io/badge/Version-v1.5.0-blue?logo=git)
 ![Python](https://img.shields.io/badge/Python-3.10%20%7C%203.11%20%7C%203.12-3776AB?logo=python&logoColor=white)
 ![Discord.py](https://img.shields.io/badge/Discord.py-v2.7.0%2B-5865F2?logo=discord&logoColor=white)
 ![Lavalink](https://img.shields.io/badge/Lavalink-v4.0%2B-FF3366?logo=audacity&logoColor=white)
@@ -228,6 +228,15 @@ discord-music-bot/
 ---
 
 ## Changelog
+
+### v1.5.0 (2026-10-16)
+- **Non-Recursive Playback Loop & Exponential Backoff**: Completely rewrote `play_next` to use an iterative loop that eliminates recursion limits during stream resolution failures; added exponential backoff retries (0.5s, 1.2s, 2.5s) on stream extraction to survive transient network spikes.
+- **Smart Stream Expiration & Cache Invalidation**: Automatically parses `expire` timestamps on Google Video stream URLs to avoid serving stale links, and actively flushes cache entries on FFmpeg playback errors.
+- **Memory & Resource Leak Elimination**: Added an explicit `__del__` destructor to `BufferedAudioSource` to guarantee background reader threads and FFmpeg processes terminate promptly; upgraded idle room state cleanup to fully cancel active progress tasks and release player views.
+- **Live Dynamic Progress Scrubber**: Added a background task that smoothly updates the Now Playing progress bar embed every 15 seconds while playing, maintaining accurate elapsed times without exceeding Discord rate limits.
+- **Real-Time YouTube Query Autocomplete**: Integrated instant YouTube search suggestions into `/play` and `/search` via non-blocking queries, delivering live autocomplete options as users type.
+- **Comprehensive 6-Language Localization**: Expanded `i18n.py` to cover all administrative, queue manipulation, seek, and DJ permission interactions across English, Traditional Chinese, Simplified Chinese, Japanese, Korean, and Spanish.
+- **Smart Autoplay Loop Prevention**: Enhanced the radio recommendation engine to filter out recently played tracks, preventing repetitive recommendation cycles.
 
 ### v1.4.0 (2026-10-15)
 - **Asynchronous Network Pipeline**: Switched track metadata fetching across Spotify, NetEase Cloud Music, and Apple Music from blocking urllib requests to non-blocking `aiohttp` with connection pooling, keeping the audio worker threads free for stream extraction.

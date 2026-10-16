@@ -56,11 +56,11 @@ def register_audio_commands(tree: app_commands.CommandTree):
 
         target_sec = parse_time_str(時間)
         if target_sec is None or target_sec < 0:
-            await interaction.response.send_message("❌ 無效的時間格式！請使用秒數 (如 90) 或 分:秒 (如 01:30)。", ephemeral=True)
+            await interaction.response.send_message(t('seek_invalid_time', interaction), ephemeral=True)
             return
 
         if state.current.duration and target_sec > state.current.duration:
-            await interaction.response.send_message(f"❌ 跳轉時間超過歌曲長度 ({format_duration(state.current.duration)})！", ephemeral=True)
+            await interaction.response.send_message(t('seek_exceed_duration', interaction, duration=format_duration(state.current.duration)), ephemeral=True)
             return
 
         bot_guild = get_bot_guild(b, interaction.guild_id, interaction.guild) or interaction.guild
@@ -75,10 +75,10 @@ def register_audio_commands(tree: app_commands.CommandTree):
                 state.start_time = time.time() - target_sec
                 state.paused_duration = 0.0
                 state.pause_timestamp = 0.0
-                await interaction.response.send_message(f"⏩ 已成功跳轉至 **{format_duration(target_sec)}**！")
+                await interaction.response.send_message(t('seek_success', interaction, time_str=format_duration(target_sec)))
                 return
             except Exception as e:
-                print(f"[{b.node_name}] Lavalink Seek Error: {e}")
+                logger.error(f"[{b.node_name}] Lavalink Seek Error: {e}")
 
         await interaction.response.defer()
         state.is_seeking = True
@@ -107,7 +107,7 @@ def register_audio_commands(tree: app_commands.CommandTree):
                 if state.is_seeking:
                     return
                 if error:
-                    print(f"[{b.node_name} Player Error] {error}")
+                    logger.error(f"[{b.node_name} Player Error] {error}")
                 asyncio.run_coroutine_threadsafe(play_next(b, bot_guild), b.loop)
 
             if hasattr(vc, 'channel') and vc.channel and hasattr(vc.channel, 'bitrate') and vc.channel.bitrate:
@@ -135,7 +135,7 @@ def register_audio_commands(tree: app_commands.CommandTree):
             state.paused_duration = 0.0
             state.pause_timestamp = 0.0
             state.is_seeking = False
-            await interaction.followup.send(f"⏩ 已成功跳轉至 **{format_duration(target_sec)}**！")
+            await interaction.followup.send(t('seek_success', interaction, time_str=format_duration(target_sec)))
         except Exception as e:
             state.is_seeking = False
             await interaction.followup.send(f"❌ 跳轉執行失敗: `{e}`", ephemeral=True)

@@ -3,6 +3,7 @@ from collections import deque
 from typing import Optional, List
 import discord
 from discord import app_commands
+import urllib.parse
 from config import (
     MEDIA_EXECUTOR,
     SPOTIFY_URL_REGEX,
@@ -10,7 +11,8 @@ from config import (
     APPLE_MUSIC_URL_REGEX,
     HAS_WAVELINK,
     wavelink,
-    get_thread_ytdl
+    get_thread_ytdl,
+    get_http_session
 )
 from i18n import t, resolve_locale
 from core.models import (
@@ -447,17 +449,35 @@ def register_music_commands(tree: app_commands.CommandTree):
             state = NODE_BOTS[0].get_state(interaction.guild_id)
 
         choices = []
+        cur_stripped = current.strip()
+
+        if cur_stripped:
+            try:
+                session = await get_http_session()
+                q_enc = urllib.parse.quote(cur_stripped)
+                api_url = f"https://suggestqueries.google.com/complete/search?client=firefox&ds=yt&q={q_enc}"
+                async with session.get(api_url, timeout=1.0) as resp:
+                    if resp.status == 200:
+                        data = await resp.json(content_type=None)
+                        if isinstance(data, list) and len(data) > 1 and isinstance(data[1], list):
+                            for s in data[1][:7]:
+                                if s and s not in [c.value for c in choices]:
+                                    choices.append(app_commands.Choice(name=f"🔍 {s[:95]}", value=s[:100]))
+            except Exception:
+                pass
+
         if state and state.history:
             seen = set()
             for song in state.history:
                 if song.title and song.title not in seen:
                     seen.add(song.title)
-                    if not current or current.lower() in song.title.lower():
-                        choices.append(app_commands.Choice(name=f"🕒 {song.title[:95]}", value=song.title[:100]))
-                        if len(choices) >= 5:
-                            break
+                    if not cur_stripped or cur_stripped.lower() in song.title.lower():
+                        if song.title not in [c.value for c in choices]:
+                            choices.append(app_commands.Choice(name=f"🕒 {song.title[:95]}", value=song.title[:100]))
+                            if len(choices) >= 10:
+                                break
 
-        if not current and not choices:
+        if not cur_stripped and not choices:
             default_suggestions = [
                 "周杰倫 經典熱門歌曲",
                 "Lofi Hip Hop chill beats",
@@ -467,6 +487,9 @@ def register_music_commands(tree: app_commands.CommandTree):
             ]
             for s in default_suggestions:
                 choices.append(app_commands.Choice(name=f"🔥 {s}", value=s))
+
+        if cur_stripped and not choices:
+            choices.append(app_commands.Choice(name=f"🔍 {cur_stripped[:95]}", value=cur_stripped[:100]))
 
         return choices[:10]
 
@@ -524,6 +547,10 @@ def register_music_commands(tree: app_commands.CommandTree):
 
         view = SearchSelectView(selected_bot, bot_guild, interaction.user, entries)
         await interaction.followup.send(embed=embed, view=view)
+
+    @slash_search.autocomplete("關鍵字")
+    async def slash_search_autocomplete(interaction: discord.Interaction, current: str) -> List[app_commands.Choice[str]]:
+        return await slash_play_autocomplete(interaction, current)
 
     @tree.command(name="skip", description="跳過你當前語音房的機器人歌曲")
     async def slash_skip(interaction: discord.Interaction):
@@ -664,34 +691,31 @@ def register_music_commands(tree: app_commands.CommandTree):
 
         state = b.get_state(interaction.guild_id)
         if not has_dj_permission(interaction, state):
-            await interaction.response.send_message(f"❌ 該指令目前僅限擁有 DJ 身分組 <@&{state.dj_role_id}> 或管理員使用！", ephemeral=True)
+            await interaction.response.send_message(t('dj_permission_denied', interaction, role_id=state.dj_role_id), ephemeral=True)
             return
 
         q_len = len(state.queue)
         if q_len == 0:
-            await interaction.response.send_message("❌ 待播清單為空，無法調整順序！", ephemeral=True)
+            await interaction.response.send_message(t('queue_empty', interaction), ephemeral=True)
             return
 
-        if 來源序號 < 1 or 來源序號 > q_len:
-            await interaction.response.send_message(f"❌ 無效的來源序號！請輸入 1 至 {q_len} 之間的數值。", ephemeral=True)
-            return
-
-        if 目標序號 < 1 or 目標序號 > q_len:
-            await interaction.response.send_message(f"❌ 無效的目標序號！請輸入 1 至 {q_len} 之間的數值。", ephemeral=True)
+        if 來源序號 < 1 or 來源序號 > q_len or 目標序號 < 1 or 目標序號 > q_len:
+            await interaction.response.send_message(t('move_invalid_range', interaction, max_idx=q_len), ephemeral=True)
             return
 
         if 來源序號 == 目標序號:
-            await interaction.response.send_message("⚠️ 來源序號與目標序號相同，順序未更動。", ephemeral=True)
+            await interaction.response.send_message(t('move_invalid_range', interaction, max_idx=q_len), ephemeral=True)
             return
 
         queue_list = list(state.queue)
         target_song = queue_list.pop(來源序號 - 1)
         queue_list.insert(目標序號 - 1, target_song)
         state.queue = deque(queue_list)
+        state.last_active = time.time()
 
         embed = discord.Embed(
             title="🔀 隊列順序調整成功！",
-            description=f"已將第 **{來源序號}** 首 **[{target_song.title}]({target_song.url})** 移動至第 **{目標序號}** 順位！",
+            description=t('move_success', interaction, src=來源序號, dst=目標序號) + f"\n**[{target_song.title}]({target_song.url})**",
             color=0x3498DB
         )
         await interaction.response.send_message(embed=embed)
@@ -714,12 +738,12 @@ def register_music_commands(tree: app_commands.CommandTree):
         vc = (bot_guild.voice_client if bot_guild else None) or discord.utils.get(getattr(selected_bot, 'voice_clients', []), guild__id=interaction.guild_id)
 
         if not state.history:
-            await interaction.response.send_message("❌ 本房間目前沒有任何歷史播放紀錄！", ephemeral=True)
+            await interaction.response.send_message(t('history_empty', interaction), ephemeral=True)
             return
 
         h_len = len(state.history)
         if 序號 < 1 or 序號 > h_len:
-            await interaction.response.send_message(f"❌ 無效的歷史序號！請輸入 1 至 {h_len} 之間的數值。", ephemeral=True)
+            await interaction.response.send_message(t('replay_invalid_index', interaction), ephemeral=True)
             return
 
         history_song = state.history[序號 - 1]

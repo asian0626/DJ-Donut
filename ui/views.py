@@ -71,7 +71,7 @@ class MusicControllerView(discord.ui.View):
     @discord.ui.button(emoji="⏭️", style=discord.ButtonStyle.secondary, row=0, custom_id="music_skip")
     async def skip(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not has_dj_permission(interaction, self.state):
-            await interaction.response.send_message(f"❌ 此操作目前僅限擁有 DJ 身分組 <@&{self.state.dj_role_id}> 或管理員使用！", ephemeral=True)
+            await interaction.response.send_message(t('dj_permission_denied', interaction, role_id=self.state.dj_role_id), ephemeral=True)
             return
         vc = interaction.guild.voice_client
         if not vc:
@@ -79,6 +79,7 @@ class MusicControllerView(discord.ui.View):
             return
         if self.state.loop_mode == 'single':
             self.state.loop_mode = 'off'
+        self.state.cancel_progress_task()
         await safe_stop(vc)
         await interaction.response.send_message(t('skipped', interaction, bot_name=self.bot.node_name))
 
@@ -94,14 +95,13 @@ class MusicControllerView(discord.ui.View):
     @discord.ui.button(emoji="⏹️", style=discord.ButtonStyle.danger, row=0, custom_id="music_stop")
     async def stop(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not has_dj_permission(interaction, self.state):
-            await interaction.response.send_message(f"❌ 此操作目前僅限擁有 DJ 身分組 <@&{self.state.dj_role_id}> 或管理員使用！", ephemeral=True)
+            await interaction.response.send_message(t('dj_permission_denied', interaction, role_id=self.state.dj_role_id), ephemeral=True)
             return
         vc = interaction.guild.voice_client
-        self.state.queue.clear()
-        self.state.current = None
-        self.state.loop_mode = 'off'
+        self.state.cleanup()
         await safe_stop(vc)
         await safe_disconnect(vc)
+        self.stop()
         await interaction.response.send_message(t('stopped_and_left', interaction, bot_name=self.bot.node_name))
 
     @discord.ui.button(label="-10%", emoji="🔉", style=discord.ButtonStyle.secondary, row=1, custom_id="music_vol_down")

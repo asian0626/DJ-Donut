@@ -13,7 +13,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-__version__ = "1.4.0"
+__version__ = "1.5.0"
 
 logging.basicConfig(
     level=logging.INFO,
@@ -156,17 +156,33 @@ def get_thread_ytdl(extract_flat: bool = False, noplaylist: bool = True) -> yt_d
 STREAM_CACHE: Dict[str, Tuple[str, Optional[str], int, float]] = {}
 STREAM_CACHE_LOCK = threading.Lock()
 
+def is_stream_url_expired(url: str) -> bool:
+    if not url:
+        return True
+    m = re.search(r'expire=(\d+)', url)
+    if m:
+        try:
+            exp_ts = int(m.group(1))
+            return time.time() >= (exp_ts - 60)
+        except Exception:
+            pass
+    return False
+
 def get_cached_stream(key: str) -> Optional[Tuple[str, Optional[str], int]]:
     now = time.time()
     with STREAM_CACHE_LOCK:
         if key in STREAM_CACHE:
             stream_url, thumb, dur, expire_at = STREAM_CACHE[key]
-            if expire_at > now:
+            if expire_at > now and not is_stream_url_expired(stream_url):
                 return stream_url, thumb, dur
             del STREAM_CACHE[key]
     return None
 
-def set_cached_stream(key: str, stream_url: str, thumb: Optional[str], dur: int, ttl: int = 1800):
+def invalidate_cached_stream(key: str):
+    with STREAM_CACHE_LOCK:
+        STREAM_CACHE.pop(key, None)
+
+def set_cached_stream(key: str, stream_url: str, thumb: Optional[str], dur: int, ttl: int = 600):
     now = time.time()
     with STREAM_CACHE_LOCK:
         if len(STREAM_CACHE) > 500:

@@ -170,13 +170,13 @@ def register_admin_commands(tree: app_commands.CommandTree):
 
         state = b.get_state(interaction.guild_id)
         if len(state.queue) < 2:
-            await interaction.response.send_message("❌ 待播隊列中至少需要有 2 首歌曲才能進行隨機打亂！", ephemeral=True)
+            await interaction.response.send_message(t('shuffle_need_more', interaction), ephemeral=True)
             return
 
         queue_list = list(state.queue)
         random.shuffle(queue_list)
         state.queue = deque(queue_list)
-        await interaction.response.send_message(f"🔀 已成功打亂待播隊列！共 **{len(state.queue)}** 首歌曲已重新排序。")
+        await interaction.response.send_message(t('shuffle_success', interaction, count=len(state.queue)))
 
     @tree.command(name="remove", description="從待播清單中移除指定序號的歌曲")
     @app_commands.describe(編號="要移除的歌曲序號 (從 1 開始，可由 /queue 查詢)")
@@ -193,21 +193,21 @@ def register_admin_commands(tree: app_commands.CommandTree):
 
         state = b.get_state(interaction.guild_id)
         if not has_dj_permission(interaction, state):
-            await interaction.response.send_message(f"❌ 該指令目前僅限擁有 DJ 身分組 <@&{state.dj_role_id}> 或管理員使用！", ephemeral=True)
+            await interaction.response.send_message(t('dj_permission_denied', interaction, role_id=state.dj_role_id), ephemeral=True)
             return
 
         if not state.queue:
-            await interaction.response.send_message("❌ 待播隊列目前為空！", ephemeral=True)
+            await interaction.response.send_message(t('queue_empty', interaction), ephemeral=True)
             return
 
         if 編號 < 1 or 編號 > len(state.queue):
-            await interaction.response.send_message(f"❌ 無效的歌曲序號！請輸入 1 ~ {len(state.queue)} 之間的數字。", ephemeral=True)
+            await interaction.response.send_message(t('remove_invalid_index', interaction, max_idx=len(state.queue)), ephemeral=True)
             return
 
         queue_list = list(state.queue)
         removed_song = queue_list.pop(編號 - 1)
         state.queue = deque(queue_list)
-        await interaction.response.send_message(f"🗑️ 已從待播隊列移除第 **{編號}** 首：**{removed_song.title}**")
+        await interaction.response.send_message(t('remove_success', interaction, index=編號, title=removed_song.title))
 
     @tree.command(name="clear", description="一鍵清空當前語音房所有的待播歌曲隊列")
     async def slash_clear(interaction: discord.Interaction):
@@ -223,16 +223,16 @@ def register_admin_commands(tree: app_commands.CommandTree):
 
         state = b.get_state(interaction.guild_id)
         if not has_dj_permission(interaction, state):
-            await interaction.response.send_message(f"❌ 該指令目前僅限擁有 DJ 身分組 <@&{state.dj_role_id}> 或管理員使用！", ephemeral=True)
+            await interaction.response.send_message(t('dj_permission_denied', interaction, role_id=state.dj_role_id), ephemeral=True)
             return
 
         count = len(state.queue)
         if count == 0:
-            await interaction.response.send_message("❌ 待播隊列原本就是空的！", ephemeral=True)
+            await interaction.response.send_message(t('queue_empty', interaction), ephemeral=True)
             return
 
         state.queue.clear()
-        await interaction.response.send_message(f"🧹 已清空待播隊列中所有的 **{count}** 首歌曲！")
+        await interaction.response.send_message(t('clear_success', interaction, count=count))
 
     @tree.command(name="history", description="檢視當前語音房最近播放過的歷史歌曲紀錄")
     async def slash_history(interaction: discord.Interaction):
@@ -248,7 +248,7 @@ def register_admin_commands(tree: app_commands.CommandTree):
 
         state = b.get_state(interaction.guild_id)
         if not state.history:
-            await interaction.response.send_message("📜 目前尚無已播放的歷史歌曲紀錄！", ephemeral=True)
+            await interaction.response.send_message(t('history_empty', interaction), ephemeral=True)
             return
 
         embed = discord.Embed(
@@ -287,7 +287,7 @@ def register_admin_commands(tree: app_commands.CommandTree):
             for b in NODE_BOTS:
                 b.get_state(interaction.guild_id).dj_role_id = None
             save_guild_setting(interaction.guild_id, "dj_role_id", None)
-            await interaction.response.send_message("🎧 已清除本伺服器的 DJ 身分組限制，所有成員皆可控制播放！")
+            await interaction.response.send_message(t('dj_role_removed', interaction))
             return
 
         if 身分組:
@@ -297,7 +297,7 @@ def register_admin_commands(tree: app_commands.CommandTree):
             for b in NODE_BOTS:
                 b.get_state(interaction.guild_id).dj_role_id = 身分組.id
             save_guild_setting(interaction.guild_id, "dj_role_id", 身分組.id)
-            await interaction.response.send_message(f"🎧 成功將本伺服器的 DJ 角色設定為 {身分組.mention}！\n非 DJ 成員在多人聆聽時將無法擅自切歌或清空隊列。")
+            await interaction.response.send_message(t('dj_role_set', interaction, role=身分組.mention))
             return
 
         if state.dj_role_id:

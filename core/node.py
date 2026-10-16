@@ -127,10 +127,7 @@ class MusicNodeBot(commands.Bot):
         guild = member.guild
         if member.id == self.user.id and after.channel is None:
             state = self.get_state(guild.id)
-            state.loop_mode = 'off'
-            state.current = None
-            state.queue.clear()
-            state.is_playing = False
+            state.cleanup()
             return
 
     async def _periodic_state_cleanup(self):
@@ -144,11 +141,7 @@ class MusicNodeBot(commands.Bot):
                     bg = self.get_guild(gid)
                     vc = bg.voice_client if bg else None
                     if not vc or not is_vc_connected(vc):
-                        if st.current_view:
-                            try:
-                                st.current_view.stop()
-                            except Exception:
-                                pass
+                        st.cleanup()
                         to_remove.append(gid)
             for gid in to_remove:
                 self.states.pop(gid, None)
