@@ -3,6 +3,7 @@ import asyncio
 import time
 import threading
 import queue
+import re
 from collections import deque
 from typing import Optional, Dict, List, Any
 from config import (
@@ -96,16 +97,20 @@ class Song:
         self.title = data.get('title', '未知標題') or '未知標題'
         raw_url = data.get('webpage_url') or data.get('url', '') or ''
         vid = data.get('id')
-        if raw_url and raw_url.startswith('http'):
-            self.url = raw_url
-        elif vid:
-            self.url = f"https://www.youtube.com/watch?v={vid}"
-        elif raw_url:
-            self.url = f"https://www.youtube.com/watch?v={raw_url}"
+        vid_str = str(vid) if vid is not None else ''
+        raw_str = str(raw_url) if raw_url is not None else ''
+        if raw_str.startswith('http'):
+            self.url = raw_str
+        elif vid_str and re.match(r'^[a-zA-Z0-9_-]{11}$', vid_str):
+            self.url = f"https://www.youtube.com/watch?v={vid_str}"
+        elif raw_str and re.match(r'^[a-zA-Z0-9_-]{11}$', raw_str):
+            self.url = f"https://www.youtube.com/watch?v={raw_str}"
+        elif raw_str and (raw_str.startswith('ytsearch') or raw_str.startswith('scsearch')):
+            self.url = raw_str
         else:
             self.url = ''
         stream_u = data.get('url', '') or ''
-        self.stream_url = stream_u if (stream_u.startswith('http') and 'googlevideo.com' in stream_u) else ''
+        self.stream_url = stream_u if (stream_u.startswith('http') and not ('youtube.com' in stream_u or 'youtu.be' in stream_u)) else ''
         self.duration = data.get('duration', 0) or 0
         self.thumbnail = data.get('thumbnail', '') or ''
         self.uploader = data.get('uploader', '未知上傳者') or '未知上傳者'

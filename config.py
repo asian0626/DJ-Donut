@@ -13,7 +13,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-__version__ = "1.5.0"
+__version__ = "1.5.1"
 
 logging.basicConfig(
     level=logging.INFO,
@@ -127,8 +127,7 @@ def get_ytdl_opts(extract_flat: bool = False, noplaylist: bool = True) -> dict:
         'socket_timeout': 15,
         'extractor_args': {
             'youtube': {
-                'player_client': ['web', 'mweb'],
-                'skip': ['hls']
+                'player_client': ['android', 'ios']
             }
         },
         'http_headers': {

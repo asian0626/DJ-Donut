@@ -1,4 +1,5 @@
 import asyncio
+import re
 from collections import deque
 from typing import Optional, List
 import discord
@@ -351,18 +352,20 @@ def register_music_commands(tree: app_commands.CommandTree):
                     continue
                 vid = e.get('id')
                 song_url = e.get('webpage_url')
-                if not song_url and vid:
-                    song_url = f"https://www.youtube.com/watch?v={vid}"
+                vid_str = str(vid) if vid is not None else ''
+                if not song_url and vid_str and re.match(r'^[a-zA-Z0-9_-]{11}$', vid_str):
+                    song_url = f"https://www.youtube.com/watch?v={vid_str}"
                 elif not song_url:
                     raw_url = e.get('url', '') or ''
-                    if raw_url.startswith('http'):
-                        song_url = raw_url
-                    elif vid:
-                        song_url = f"https://www.youtube.com/watch?v={vid}"
-                    elif raw_url:
-                        song_url = f"https://www.youtube.com/watch?v={raw_url}"
+                    raw_str = str(raw_url) if raw_url is not None else ''
+                    if raw_str.startswith('http'):
+                        song_url = raw_str
+                    elif vid_str and re.match(r'^[a-zA-Z0-9_-]{11}$', vid_str):
+                        song_url = f"https://www.youtube.com/watch?v={vid_str}"
+                    elif raw_str and re.match(r'^[a-zA-Z0-9_-]{11}$', raw_str):
+                        song_url = f"https://www.youtube.com/watch?v={raw_str}"
                     else:
-                        song_url = title
+                        song_url = ''
                 song = Song({
                     'id': vid,
                     'title': title,

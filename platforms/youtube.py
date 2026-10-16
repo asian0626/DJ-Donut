@@ -23,9 +23,9 @@ def _extract_media_info(data: Optional[dict]) -> Tuple[Optional[str], Optional[s
             audio_formats = [
                 f for f in target['formats']
                 if f.get('url') and (
-                    f.get('acodec') != 'none' or
-                    f.get('vcodec') == 'none' or
-                    'audio' in f.get('format', '').lower()
+                    (f.get('acodec') and f.get('acodec') != 'none') or
+                    ('audio' in f.get('format', '').lower()) or
+                    (f.get('ext') in ('webm', 'm4a', 'opus', 'mp3', 'aac', 'ogg', 'wav') and f.get('acodec') != 'none')
                 )
             ]
             if audio_formats:
@@ -60,7 +60,7 @@ def extract_stream_url_sync(song_url: str, song_title: str) -> Tuple[Optional[st
     stream_url, thumb, dur = None, None, 0
     backoffs = [0.5, 1.2, 2.5]
 
-    if not ("spotify.com" in song_url or song_url.startswith("spotify:")):
+    if song_url and not ("spotify.com" in song_url or song_url.startswith("spotify:")):
         for attempt, delay in enumerate(backoffs):
             try:
                 ydl = get_thread_ytdl(extract_flat=False, noplaylist=True)
@@ -73,18 +73,27 @@ def extract_stream_url_sync(song_url: str, song_title: str) -> Tuple[Optional[st
                     time.sleep(delay)
 
     if not stream_url and song_title:
-        clean_title = re.sub(r'[\(\[\{].*?[\)\]\}]', '', song_title).strip()
-        yt_query = f"ytsearch5:{clean_title or song_title}"
         for attempt, delay in enumerate(backoffs):
             try:
                 ydl_yt = get_thread_ytdl(extract_flat=False, noplaylist=True)
-                yt_data = ydl_yt.extract_info(yt_query, download=False)
+                yt_data = ydl_yt.extract_info(f"ytsearch5:{song_title}", download=False)
                 stream_url, thumb, dur = _extract_media_info(yt_data)
                 if stream_url:
                     break
             except Exception:
                 if attempt < len(backoffs) - 1:
                     time.sleep(delay)
+
+    if not stream_url and song_title:
+        clean_title = re.sub(r'[\(\[\{\【\「\『\《\（\［].*?[\)\]\}\】\」\』\》\）\］]', '', song_title).strip()
+        clean_title = re.sub(r'(official\s+video|official\s+audio|mv|lyrics|feat\..*|ft\..*)', '', clean_title, flags=re.I).strip()
+        if clean_title and clean_title != song_title:
+            try:
+                ydl_yt2 = get_thread_ytdl(extract_flat=False, noplaylist=True)
+                yt_data2 = ydl_yt2.extract_info(f"ytsearch5:{clean_title}", download=False)
+                stream_url, thumb, dur = _extract_media_info(yt_data2)
+            except Exception:
+                pass
 
     if not stream_url and song_title:
         try:
