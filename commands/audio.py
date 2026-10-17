@@ -17,7 +17,9 @@ from core.models import (
     BufferedAudioSource,
     is_vc_connected,
     is_vc_playing,
-    is_vc_paused
+    is_vc_paused,
+    safe_pause_resume,
+    has_dj_permission
 )
 from core.node import NODE_BOTS
 from core.dispatcher import (
@@ -139,6 +141,71 @@ def register_audio_commands(tree: app_commands.CommandTree):
         except Exception as e:
             state.is_seeking = False
             await interaction.followup.send(f"❌ 跳轉執行失敗: `{e}`", ephemeral=True)
+
+    @tree.command(name="pause", description="暫停當前語音房的音樂播放 (Pause playback)")
+    async def slash_pause(interaction: discord.Interaction):
+        voice_channel = await get_user_voice_channel(interaction)
+        if not voice_channel:
+            await interaction.response.send_message(t('must_join_voice', interaction), ephemeral=True)
+            return
+
+        b = get_bot_in_user_room(interaction.guild_id, voice_channel, interaction.guild)
+        if not b:
+            await interaction.response.send_message(t('no_bot_in_room', interaction), ephemeral=True)
+            return
+
+        state = b.get_state(interaction.guild_id)
+        if not has_dj_permission(interaction, state):
+            await interaction.response.send_message(t('dj_permission_denied', interaction, role_id=state.dj_role_id), ephemeral=True)
+            return
+
+        bot_guild = get_bot_guild(b, interaction.guild_id, interaction.guild) or interaction.guild
+        vc = (bot_guild.voice_client if bot_guild else None) or discord.utils.get(getattr(b, 'voice_clients', []), guild__id=interaction.guild_id)
+        if not vc or not is_vc_connected(vc) or not state.current:
+            await interaction.response.send_message(t('not_playing', interaction), ephemeral=True)
+            return
+
+        if is_vc_paused(vc):
+            await interaction.response.send_message(t('paused', interaction, bot_name=b.node_name), ephemeral=True)
+            return
+
+        await safe_pause_resume(vc, state, bot=b, guild=bot_guild)
+        if state.current_view:
+            state.current_view._update_button_states()
+        await interaction.response.send_message(t('paused', interaction, bot_name=b.node_name))
+
+    @tree.command(name="resume", description="繼續播放已暫停的音樂 (Resume playback)")
+    async def slash_resume(interaction: discord.Interaction):
+        voice_channel = await get_user_voice_channel(interaction)
+        if not voice_channel:
+            await interaction.response.send_message(t('must_join_voice', interaction), ephemeral=True)
+            return
+
+        b = get_bot_in_user_room(interaction.guild_id, voice_channel, interaction.guild)
+        if not b:
+            await interaction.response.send_message(t('no_bot_in_room', interaction), ephemeral=True)
+            return
+
+        state = b.get_state(interaction.guild_id)
+        if not has_dj_permission(interaction, state):
+            await interaction.response.send_message(t('dj_permission_denied', interaction, role_id=state.dj_role_id), ephemeral=True)
+            return
+
+        bot_guild = get_bot_guild(b, interaction.guild_id, interaction.guild) or interaction.guild
+        vc = (bot_guild.voice_client if bot_guild else None) or discord.utils.get(getattr(b, 'voice_clients', []), guild__id=interaction.guild_id)
+        if not vc or not is_vc_connected(vc) or not state.current:
+            await interaction.response.send_message(t('not_playing', interaction), ephemeral=True)
+            return
+
+        if not is_vc_paused(vc):
+            await interaction.response.send_message(t('resumed', interaction, bot_name=b.node_name), ephemeral=True)
+            return
+
+        await interaction.response.defer()
+        await safe_pause_resume(vc, state, bot=b, guild=bot_guild)
+        if state.current_view:
+            state.current_view._update_button_states()
+        await interaction.followup.send(t('resumed', interaction, bot_name=b.node_name))
 
     @tree.command(name="bitrate", description="查看或一鍵將當前語音房提升至伺服器最高音質位元率 (96k ~ 384k)")
     @app_commands.describe(指定位元率="可選：手動指定 kbps 數值 (例如 96, 128, 256, 384)；留空則自動升至伺服器最高上限")

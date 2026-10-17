@@ -18,21 +18,23 @@ from lyrics import get_lyrics
 
 class MusicControllerView(discord.ui.View):
     def __init__(self, bot: 'MusicNodeBot', state: GuildMusicState):
-        super().__init__(timeout=300)
+        super().__init__(timeout=None)
         self.bot = bot
         self.state = state
         self._update_button_states()
 
-    async def on_timeout(self):
-        for child in self.children:
-            if hasattr(child, 'disabled'):
-                child.disabled = True
-        self.stop()
-
     def _update_button_states(self):
+        is_paused = (self.state.pause_timestamp > 0)
         for child in self.children:
             if isinstance(child, discord.ui.Button):
-                if child.custom_id == "music_loop":
+                if child.custom_id == "music_play_pause":
+                    if is_paused:
+                        child.emoji = "▶️"
+                        child.style = discord.ButtonStyle.secondary
+                    else:
+                        child.emoji = "⏸️"
+                        child.style = discord.ButtonStyle.primary
+                elif child.custom_id == "music_loop":
                     if self.state.loop_mode == 'single':
                         child.emoji = "🔂"
                         child.label = "單曲"
@@ -64,9 +66,14 @@ class MusicControllerView(discord.ui.View):
         if not vc:
             await interaction.response.send_message(t('no_bot_in_room', interaction), ephemeral=True)
             return
-        res = await safe_pause_resume(vc, self.state)
+        await interaction.response.defer()
+        res = await safe_pause_resume(vc, self.state, bot=self.bot, guild=interaction.guild)
+        self._update_button_states()
         embed = build_nowplaying_embed(self.bot, self.state.current, self.state, lang=resolve_locale(interaction))
-        await interaction.response.edit_message(embed=embed, view=self)
+        try:
+            await interaction.edit_original_response(embed=embed, view=self)
+        except Exception:
+            pass
 
     @discord.ui.button(emoji="⏭️", style=discord.ButtonStyle.secondary, row=0, custom_id="music_skip")
     async def skip(self, interaction: discord.Interaction, button: discord.ui.Button):

@@ -4,6 +4,7 @@ import time
 import threading
 import queue
 import re
+import subprocess
 from collections import deque
 from typing import Optional, Dict, List, Any
 from config import (
@@ -11,6 +12,9 @@ from config import (
     save_guild_setting,
     BASSBOOST_PRESETS,
     EQ_PRESETS,
+    MEDIA_EXECUTOR,
+    get_ffmpeg_options,
+    is_stream_url_expired,
     logger
 )
 
@@ -211,9 +215,11 @@ def is_vc_paused(vc) -> bool:
 def is_vc_active(vc) -> bool:
     return is_vc_playing(vc) or is_vc_paused(vc)
 
-async def safe_pause_resume(vc, state: Optional['GuildMusicState'] = None) -> str:
+async def safe_pause_resume(vc, state: Optional['GuildMusicState'] = None, bot: Optional[Any] = None, guild: Optional[discord.Guild] = None) -> str:
     if not vc:
         return "none"
+    bot = bot or getattr(vc, 'client', None)
+    guild = guild or getattr(vc, 'guild', None)
     if hasattr(vc, 'paused'):
         if vc.paused:
             if asyncio.iscoroutinefunction(vc.pause):
@@ -233,6 +239,61 @@ async def safe_pause_resume(vc, state: Optional['GuildMusicState'] = None) -> st
                 state.pause_timestamp = time.time()
             return "paused"
     if is_vc_paused(vc):
+        pause_dur = (time.time() - state.pause_timestamp) if (state and state.pause_timestamp > 0) else 0
+        current_song = state.current if state else None
+        if pause_dur >= 15 and current_song and bot and guild:
+            try:
+                state.is_seeking = True
+                current_sec = get_playback_elapsed(state)
+                stream_url = getattr(current_song, 'stream_url', '')
+                if not stream_url or not stream_url.startswith('http') or is_stream_url_expired(stream_url):
+                    loop = asyncio.get_event_loop()
+                    from platforms.youtube import extract_stream_url_sync
+                    stream_url, _, _ = await loop.run_in_executor(
+                        MEDIA_EXECUTOR, lambda: extract_stream_url_sync(current_song.url, current_song.title)
+                    )
+                if stream_url:
+                    current_song.stream_url = stream_url
+                    await safe_stop(vc)
+                    ffmpeg_opts = get_ffmpeg_options(state, seek_seconds=current_sec)
+                    source = discord.FFmpegPCMAudio(stream_url, stderr=subprocess.DEVNULL, **ffmpeg_opts)
+                    buffered_source = BufferedAudioSource(source, prefetch_frames=50, max_frames=500)
+                    audio_source = discord.PCMVolumeTransformer(buffered_source, volume=state.volume)
+
+                    if hasattr(vc, 'channel') and vc.channel and hasattr(vc.channel, 'bitrate') and vc.channel.bitrate:
+                        target_bps = min(384000, max(64000, vc.channel.bitrate))
+                        for enc_attr in ('encoder', '_encoder'):
+                            enc = getattr(vc, enc_attr, None)
+                            if enc:
+                                if hasattr(enc, 'set_bitrate') and callable(enc.set_bitrate):
+                                    try:
+                                        enc.set_bitrate(target_bps // 1000)
+                                    except Exception:
+                                        pass
+                                elif hasattr(enc, 'bitrate'):
+                                    try:
+                                        enc.bitrate = target_bps
+                                    except Exception:
+                                        pass
+
+                    def after_callback(error):
+                        if state.is_seeking:
+                            return
+                        if error:
+                            logger.error(f"[{bot.node_name if hasattr(bot, 'node_name') else 'Bot'} Player Error] {error}")
+                        from core.player import play_next
+                        asyncio.run_coroutine_threadsafe(play_next(bot, guild), bot.loop)
+
+                    vc.play(audio_source, after=after_callback)
+                    state.start_time = time.time() - current_sec
+                    state.paused_duration = 0.0
+                    state.pause_timestamp = 0.0
+                    state.is_seeking = False
+                    return "resumed"
+            except Exception as e:
+                logger.error(f"[Resume Reanchor Error] {e}")
+                state.is_seeking = False
+
         if hasattr(vc, 'resume') and callable(vc.resume):
             vc.resume()
             if state and state.pause_timestamp > 0:
