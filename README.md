@@ -2,7 +2,7 @@
 
 <div align="center">
 
-![Version](https://img.shields.io/badge/Version-v1.5.0-blue?logo=git)
+![Version](https://img.shields.io/badge/Version-v1.5.3-blue?logo=git)
 ![Python](https://img.shields.io/badge/Python-3.10%20%7C%203.11%20%7C%203.12-3776AB?logo=python&logoColor=white)
 ![Discord.py](https://img.shields.io/badge/Discord.py-v2.7.0%2B-5865F2?logo=discord&logoColor=white)
 ![Lavalink](https://img.shields.io/badge/Lavalink-v4.0%2B-FF3366?logo=audacity&logoColor=white)
@@ -228,6 +228,12 @@ discord-music-bot/
 ---
 
 ## Changelog
+
+### v1.5.3 (2026-10-18)
+- **Admin Kick & Voice Disconnect Recovery**: Fully handled voice disconnect events (`VOICE_STATE_UPDATE` where `after.channel is None`) by cleanly disconnecting and deregistering the `VoiceClient` from discord.py's internal connection state, completely preventing `ClientException: Already connected to a voice channel for this guild` on subsequent `/play` commands.
+- **Cute Departure Notification**: Sent a sweet pastel-pink embed with kaomoji (`(｡•́︿•̀｡)` & `(๑•́ ₃ •̀๑)`) to the room's text channel if the bot is kicked or disconnected by an administrator, notifying users that the bot can be summoned back immediately with `/play`.
+- **Extended Pause Recovery & Re-Anchoring**: Fixed audio freezing and playback failure after extended pause periods by flushing stale cached stream URLs, fetching fresh YouTube CDN streams, and safely awaiting `AudioPlayer` termination before re-anchoring playback with FFmpeg.
+- **Auto Voice Reconnect on Resume**: Added automatic voice channel reconnection if the voice socket dropped or timed out during a prolonged pause, ensuring seamless resumption right from where playback stopped.
 
 ### v1.5.0 (2026-10-16)
 - **Non-Recursive Playback Loop & Exponential Backoff**: Completely rewrote `play_next` to use an iterative loop that eliminates recursion limits during stream resolution failures; added exponential backoff retries (0.5s, 1.2s, 2.5s) on stream extraction to survive transient network spikes.

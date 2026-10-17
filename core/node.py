@@ -127,7 +127,28 @@ class MusicNodeBot(commands.Bot):
         guild = member.guild
         if member.id == self.user.id and after.channel is None:
             state = self.get_state(guild.id)
+            prev_channel = before.channel
             state.cleanup()
+            bg = self.get_guild(guild.id) or guild
+            vc = (bg.voice_client if bg else None) or discord.utils.get(getattr(self, 'voice_clients', []), guild__id=guild.id)
+            if vc:
+                from core.models import safe_stop, safe_disconnect
+                await safe_stop(vc)
+                await safe_disconnect(vc)
+            if state.text_channel and prev_channel:
+                try:
+                    from i18n import t
+                    embed = discord.Embed(
+                        title=t('bot_kicked_title', guild_id=guild.id),
+                        description=t('bot_kicked_desc', guild_id=guild.id, bot_name=self.node_name, channel=prev_channel.name),
+                        color=0xFFB6C1
+                    )
+                    embed.set_footer(text=t('bot_kicked_footer', guild_id=guild.id))
+                    if self.user.display_avatar:
+                        embed.set_thumbnail(url=self.user.display_avatar.url)
+                    await state.text_channel.send(embed=embed)
+                except Exception:
+                    pass
             return
 
     async def _periodic_state_cleanup(self):

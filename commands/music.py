@@ -20,7 +20,8 @@ from core.models import (
     Song,
     is_vc_connected,
     is_vc_active,
-    has_dj_permission
+    has_dj_permission,
+    safe_voice_connect
 )
 from core.node import NODE_BOTS, MusicNodeBot
 from core.dispatcher import (
@@ -132,12 +133,12 @@ def register_music_commands(tree: app_commands.CommandTree):
             try:
                 if should_be_wavelink:
                     try:
-                        vc = await bot_voice_channel.connect(cls=wavelink.Player, self_deaf=True)
+                        vc = await safe_voice_connect(selected_bot, bot_voice_channel, cls=wavelink.Player)
                     except Exception as wl_conn_err:
                         print(f"[{selected_bot.node_name}] Lavalink Player 連線異常 ({wl_conn_err})，使用原生語音連線...")
-                        vc = await bot_voice_channel.connect(reconnect=True, timeout=30.0, self_deaf=True)
+                        vc = await safe_voice_connect(selected_bot, bot_voice_channel, timeout=30.0)
                 else:
-                    vc = await bot_voice_channel.connect(reconnect=True, timeout=30.0, self_deaf=True)
+                    vc = await safe_voice_connect(selected_bot, bot_voice_channel, timeout=30.0)
             except Exception as e:
                 await interaction.followup.send(t('connect_failed', interaction, bot_name=selected_bot.node_name, error=str(e)))
                 return
@@ -310,7 +311,7 @@ def register_music_commands(tree: app_commands.CommandTree):
 
             song = Song(yt_data, interaction.user)
 
-            if is_vc_active(vc):
+            if is_vc_active(vc) and state.current:
                 state.queue.append(song)
                 embed = build_song_queued_embed(selected_bot, song, state, len(state.queue), interaction)
                 await interaction.followup.send(embed=embed)
@@ -433,7 +434,7 @@ def register_music_commands(tree: app_commands.CommandTree):
 
         song = Song(data, interaction.user)
 
-        if is_vc_active(vc):
+        if is_vc_active(vc) and state.current:
             state.queue.append(song)
             embed = build_song_queued_embed(selected_bot, song, state, len(state.queue), interaction)
             await interaction.followup.send(embed=embed)
@@ -515,7 +516,7 @@ def register_music_commands(tree: app_commands.CommandTree):
 
         if is_new_join or not vc or not is_vc_connected(vc):
             try:
-                vc = await voice_channel.connect(reconnect=True, timeout=20.0, self_deaf=True)
+                vc = await safe_voice_connect(selected_bot, voice_channel, timeout=20.0)
             except Exception as e:
                 await interaction.followup.send(t('connect_failed', interaction, bot_name=selected_bot.node_name, error=str(e)))
                 return
@@ -757,7 +758,7 @@ def register_music_commands(tree: app_commands.CommandTree):
 
         if is_new_join or not vc or not is_vc_connected(vc):
             try:
-                vc = await voice_channel.connect(reconnect=True, timeout=20.0, self_deaf=True)
+                vc = await safe_voice_connect(selected_bot, voice_channel, timeout=20.0)
             except Exception as e:
                 await interaction.response.send_message(t('connect_failed', interaction, bot_name=selected_bot.node_name, error=str(e)), ephemeral=True)
                 return

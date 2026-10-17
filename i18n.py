@@ -639,6 +639,30 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         'ja': '⚠️ 連続5曲の解析に失敗しました。ループ防止のため自動一時停止しました。',
         'ko': '⚠️ 연속 5곡 재생 실패를 감지했습니다. 무한 루프를 방지하기 위해 자동으로 일시 중지되었습니다.',
         'es': '⚠️ Se detectaron 5 fallos consecutivos de reproducción. Pausa automática para prevenir bucles.'
+    },
+    'bot_kicked_title': {
+        'en': '🐾 Uwah… I was disconnected from the voice room (｡•́︿•̀｡)',
+        'zh-TW': '🐾 嗚嗚… 我被踢出語音房了 (｡•́︿•̀｡)',
+        'zh-CN': '🐾 呜呜… 我被踢出语音房了 (｡•́︿•̀｡)',
+        'ja': '🐾 うぅ… ボイスルームから切断されちゃいました (｡•́︿•̀｡)',
+        'ko': '🐾 잉… 음성 채널에서 퇴장당했어요 (｡•́︿•̀｡)',
+        'es': '🐾 Uwah… Me desconectaron de la sala de voz (｡•́︿•̀｡)'
+    },
+    'bot_kicked_desc': {
+        'en': '【{bot_name}】 had to leave **{channel}** sadly (๑•́ ₃ •̀๑)\nWhenever you want music, just type </play:0> and I will zoom right back! 🐾',
+        'zh-TW': '【{bot_name}】已經依依不捨地離開了 **{channel}**～ (๑•́ ₃ •̀๑)\n隨時輸入 </play:0> 我就會立刻飛奔回來陪大家聽歌喔！🐾',
+        'zh-CN': '【{bot_name}】已经依依不舍地离开了 **{channel}**～ (๑•́ ₃ •̀๑)\n随时输入 </play:0> 我就会立刻飞奔回来陪大家听歌哦！🐾',
+        'ja': '【{bot_name}】は寂しそうに **{channel}** を退出しました (๑•́ ₃ •̀๑)\nまたいつでも </play:0> で呼んでくれたらすっ飛んで戻ってきます！🐾',
+        'ko': '【{bot_name}】이(가) 아쉬운 마음으로 **{channel}**에서 나왔어요 (๑•́ ₃ •̀๑)\n언제든 </play:0> 명령어로 다시 불러주시면 쏜살같이 달려갈게요! 🐾',
+        'es': '【{bot_name}】 tuvo que salir de **{channel}** tristemente (๑•́ ₃ •̀๑)\n¡Usa </play:0> cuando quieras y volveré volando a poner música! 🐾'
+    },
+    'bot_kicked_footer': {
+        'en': '💡 Please don\'t kick me out next time~ I am always on standby!',
+        'zh-TW': '💡 下次不要隨便把我踢掉嘛～ 我隨時待命中！',
+        'zh-CN': '💡 下次不要随便把我踢掉嘛～ 我随时待命中！',
+        'ja': '💡 次は急に切断しないでね～ いつでも待機中です！',
+        'ko': '💡 다음엔 갑자기 내보내지 말아주세요~ 항상 대기 중이에요!',
+        'es': '💡 ¡La próxima vez no me eches tan rápido~ Siempre estoy listo!'
     }
 }
 

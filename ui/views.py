@@ -10,7 +10,9 @@ from core.models import (
     safe_stop,
     safe_disconnect,
     has_dj_permission,
-    is_vc_active
+    is_vc_active,
+    is_vc_connected,
+    safe_voice_connect
 )
 from ui.embeds import build_nowplaying_embed, build_queue_embed
 from i18n import t, resolve_locale
@@ -62,12 +64,18 @@ class MusicControllerView(discord.ui.View):
 
     @discord.ui.button(emoji="⏯️", style=discord.ButtonStyle.primary, row=0, custom_id="music_play_pause")
     async def play_pause(self, interaction: discord.Interaction, button: discord.ui.Button):
-        vc = interaction.guild.voice_client
+        bot_guild = self.bot.get_guild(interaction.guild_id) or interaction.guild
+        vc = (bot_guild.voice_client if bot_guild else None) or discord.utils.get(getattr(self.bot, 'voice_clients', []), guild__id=interaction.guild_id)
         if not vc:
             await interaction.response.send_message(t('no_bot_in_room', interaction), ephemeral=True)
             return
+        if not is_vc_connected(vc):
+            user_voice = interaction.user.voice.channel if (interaction.user and interaction.user.voice) else None
+            target_ch = user_voice or getattr(vc, 'channel', None)
+            if target_ch:
+                vc = await safe_voice_connect(self.bot, target_ch, timeout=30.0)
         await interaction.response.defer()
-        res = await safe_pause_resume(vc, self.state, bot=self.bot, guild=interaction.guild)
+        res = await safe_pause_resume(vc, self.state, bot=self.bot, guild=bot_guild)
         self._update_button_states()
         embed = build_nowplaying_embed(self.bot, self.state.current, self.state, lang=resolve_locale(interaction))
         try:

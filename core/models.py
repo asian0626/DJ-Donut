@@ -15,6 +15,7 @@ from config import (
     MEDIA_EXECUTOR,
     get_ffmpeg_options,
     is_stream_url_expired,
+    invalidate_cached_stream,
     logger
 )
 
@@ -167,6 +168,10 @@ class GuildMusicState:
         self.queue.clear()
         self.current = None
         self.is_playing = False
+        self.paused_duration = 0.0
+        self.pause_timestamp = 0.0
+        self.consecutive_failures = 0
+        self.is_seeking = False
 
     def load_persisted_settings(self):
         data = load_all_guild_settings().get(str(self.guild_id), {})
@@ -238,23 +243,28 @@ async def safe_pause_resume(vc, state: Optional['GuildMusicState'] = None, bot: 
             if state:
                 state.pause_timestamp = time.time()
             return "paused"
-    if is_vc_paused(vc):
+    if is_vc_paused(vc) or (state and state.pause_timestamp > 0):
         pause_dur = (time.time() - state.pause_timestamp) if (state and state.pause_timestamp > 0) else 0
         current_song = state.current if state else None
-        if pause_dur >= 15 and current_song and bot and guild:
+        if (pause_dur >= 10 or not is_vc_connected(vc)) and current_song and bot and guild:
             try:
                 state.is_seeking = True
                 current_sec = get_playback_elapsed(state)
-                stream_url = getattr(current_song, 'stream_url', '')
-                if not stream_url or not stream_url.startswith('http') or is_stream_url_expired(stream_url):
-                    loop = asyncio.get_event_loop()
-                    from platforms.youtube import extract_stream_url_sync
-                    stream_url, _, _ = await loop.run_in_executor(
-                        MEDIA_EXECUTOR, lambda: extract_stream_url_sync(current_song.url, current_song.title)
-                    )
+                invalidate_cached_stream(current_song.url)
+                invalidate_cached_stream(current_song.title)
+                loop = asyncio.get_event_loop()
+                from platforms.youtube import extract_stream_url_sync
+                fresh_url, _, _ = await loop.run_in_executor(
+                    MEDIA_EXECUTOR, lambda: extract_stream_url_sync(current_song.url, current_song.title)
+                )
+                stream_url = fresh_url or getattr(current_song, 'stream_url', '')
                 if stream_url:
                     current_song.stream_url = stream_url
                     await safe_stop(vc)
+                    if not is_vc_connected(vc):
+                        target_ch = getattr(vc, 'channel', None)
+                        if target_ch:
+                            vc = await safe_voice_connect(bot, target_ch)
                     ffmpeg_opts = get_ffmpeg_options(state, seek_seconds=current_sec)
                     source = discord.FFmpegPCMAudio(stream_url, stderr=subprocess.DEVNULL, **ffmpeg_opts)
                     buffered_source = BufferedAudioSource(source, prefetch_frames=50, max_frames=500)
@@ -317,6 +327,11 @@ async def safe_stop(vc):
                 await vc.stop()
             else:
                 vc.stop()
+        for _ in range(20):
+            player = getattr(vc, '_player', None)
+            if not player or not getattr(player, 'is_alive', lambda: False)():
+                break
+            await asyncio.sleep(0.05)
     except Exception as e:
         logger.error(f"[Safe Stop Error] {e}")
 
@@ -324,6 +339,7 @@ async def safe_disconnect(vc):
     if not vc:
         return
     try:
+        await safe_stop(vc)
         if hasattr(vc, 'disconnect'):
             if asyncio.iscoroutinefunction(vc.disconnect):
                 try:
@@ -334,9 +350,60 @@ async def safe_disconnect(vc):
                 try:
                     vc.disconnect(force=True)
                 except TypeError:
-                    await vc.disconnect()
+                    vc.disconnect()
+        if hasattr(vc, 'cleanup') and callable(vc.cleanup):
+            try:
+                vc.cleanup()
+            except Exception:
+                pass
+        client = getattr(vc, 'client', None)
+        guild = getattr(vc, 'guild', None)
+        if client and guild:
+            conn = getattr(client, '_connection', None)
+            if conn and hasattr(conn, '_voice_clients') and isinstance(conn._voice_clients, dict):
+                conn._voice_clients.pop(guild.id, None)
+            vcs = getattr(client, 'voice_clients', None)
+            if isinstance(vcs, list) and vc in vcs:
+                try:
+                    vcs.remove(vc)
+                except Exception:
+                    pass
+        if hasattr(vc, 'channel'):
+            vc.channel = None
     except Exception as e:
         logger.error(f"[Safe Disconnect Error] {e}")
+
+async def safe_voice_connect(bot: Any, voice_channel: discord.VoiceChannel, timeout: float = 30.0, cls: Any = None) -> Any:
+    guild_id = voice_channel.guild.id
+    bot_guild = bot.get_guild(guild_id) or voice_channel.guild
+    vc = (bot_guild.voice_client if bot_guild else None) or discord.utils.get(getattr(bot, 'voice_clients', []), guild__id=guild_id)
+    if vc and not is_vc_connected(vc):
+        await safe_disconnect(vc)
+        vc = None
+    if vc and is_vc_connected(vc):
+        if getattr(vc, 'channel', None) != voice_channel:
+            await vc.move_to(voice_channel)
+        return vc
+    conn_kwargs = {'timeout': timeout, 'self_deaf': True}
+    if cls is not None:
+        conn_kwargs['cls'] = cls
+    else:
+        conn_kwargs['reconnect'] = True
+    try:
+        vc = await voice_channel.connect(**conn_kwargs)
+        return vc
+    except Exception as e:
+        err_msg = str(e).lower()
+        if "already connected" in err_msg or "already in" in err_msg:
+            stale_vc = (bot_guild.voice_client if bot_guild else None) or discord.utils.get(getattr(bot, 'voice_clients', []), guild__id=guild_id)
+            if stale_vc:
+                await safe_disconnect(stale_vc)
+            conn = getattr(bot, '_connection', None)
+            if conn and hasattr(conn, '_voice_clients') and isinstance(conn._voice_clients, dict):
+                conn._voice_clients.pop(guild_id, None)
+            vc = await voice_channel.connect(**conn_kwargs)
+            return vc
+        raise
 
 def has_dj_permission(interaction: discord.Interaction, state: 'GuildMusicState') -> bool:
     if not state.dj_role_id:

@@ -7,7 +7,11 @@ from core.models import (
     is_vc_active,
     is_vc_paused,
     has_dj_permission,
-    get_playback_elapsed
+    get_playback_elapsed,
+    safe_stop,
+    safe_disconnect,
+    safe_pause_resume,
+    safe_voice_connect
 )
 from core.node import (
     MusicNodeBot,
@@ -35,6 +39,10 @@ __all__ = [
     "is_vc_paused",
     "has_dj_permission",
     "get_playback_elapsed",
+    "safe_stop",
+    "safe_disconnect",
+    "safe_pause_resume",
+    "safe_voice_connect",
     "MusicNodeBot",
     "NODE_BOTS",
     "check_lavalink_health",

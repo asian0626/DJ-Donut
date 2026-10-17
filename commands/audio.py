@@ -19,7 +19,8 @@ from core.models import (
     is_vc_playing,
     is_vc_paused,
     safe_pause_resume,
-    has_dj_permission
+    has_dj_permission,
+    safe_voice_connect
 )
 from core.node import NODE_BOTS
 from core.dispatcher import (
@@ -193,11 +194,19 @@ def register_audio_commands(tree: app_commands.CommandTree):
 
         bot_guild = get_bot_guild(b, interaction.guild_id, interaction.guild) or interaction.guild
         vc = (bot_guild.voice_client if bot_guild else None) or discord.utils.get(getattr(b, 'voice_clients', []), guild__id=interaction.guild_id)
-        if not vc or not is_vc_connected(vc) or not state.current:
+        if not state.current:
             await interaction.response.send_message(t('not_playing', interaction), ephemeral=True)
             return
 
-        if not is_vc_paused(vc):
+        if not vc or not is_vc_connected(vc):
+            user_voice = interaction.user.voice.channel if (interaction.user and interaction.user.voice) else None
+            target_ch = user_voice or getattr(vc, 'channel', None)
+            if not target_ch:
+                await interaction.response.send_message(t('not_in_voice', interaction), ephemeral=True)
+                return
+            vc = await safe_voice_connect(b, target_ch, timeout=30.0)
+
+        if not is_vc_paused(vc) and state.pause_timestamp == 0:
             await interaction.response.send_message(t('resumed', interaction, bot_name=b.node_name), ephemeral=True)
             return
 
