@@ -52,12 +52,17 @@ class MusicControllerView(discord.ui.View):
                 elif child.custom_id == "music_autoplay":
                     child.style = discord.ButtonStyle.success if self.state.autoplay else discord.ButtonStyle.secondary
 
+    def _get_vc(self, interaction: discord.Interaction):
+        bot_guild = self.bot.get_guild(interaction.guild_id) or interaction.guild
+        return (bot_guild.voice_client if bot_guild else None) or discord.utils.get(getattr(self.bot, 'voice_clients', []), guild__id=interaction.guild_id)
+
     @discord.ui.button(emoji="⏮️", style=discord.ButtonStyle.secondary, row=0, custom_id="music_replay")
     async def replay(self, interaction: discord.Interaction, button: discord.ui.Button):
-        vc = interaction.guild.voice_client
+        vc = self._get_vc(interaction)
         if not vc or not self.state.current:
             await interaction.response.send_message(t('not_playing', interaction), ephemeral=True)
             return
+        self.state.last_active = time.time()
         self.state.queue.appendleft(self.state.current)
         await safe_stop(vc)
         await interaction.response.send_message("⏮️ 重播當前歌曲！", ephemeral=True)
@@ -65,10 +70,11 @@ class MusicControllerView(discord.ui.View):
     @discord.ui.button(emoji="⏯️", style=discord.ButtonStyle.primary, row=0, custom_id="music_play_pause")
     async def play_pause(self, interaction: discord.Interaction, button: discord.ui.Button):
         bot_guild = self.bot.get_guild(interaction.guild_id) or interaction.guild
-        vc = (bot_guild.voice_client if bot_guild else None) or discord.utils.get(getattr(self.bot, 'voice_clients', []), guild__id=interaction.guild_id)
+        vc = self._get_vc(interaction)
         if not vc:
             await interaction.response.send_message(t('no_bot_in_room', interaction), ephemeral=True)
             return
+        self.state.last_active = time.time()
         if not is_vc_connected(vc):
             user_voice = interaction.user.voice.channel if (interaction.user and interaction.user.voice) else None
             target_ch = user_voice or getattr(vc, 'channel', None)
@@ -88,10 +94,11 @@ class MusicControllerView(discord.ui.View):
         if not has_dj_permission(interaction, self.state):
             await interaction.response.send_message(t('dj_permission_denied', interaction, role_id=self.state.dj_role_id), ephemeral=True)
             return
-        vc = interaction.guild.voice_client
+        vc = self._get_vc(interaction)
         if not vc:
             await interaction.response.send_message(t('not_playing', interaction), ephemeral=True)
             return
+        self.state.last_active = time.time()
         if self.state.loop_mode == 'single':
             self.state.loop_mode = 'off'
         self.state.cancel_progress_task()
@@ -100,6 +107,7 @@ class MusicControllerView(discord.ui.View):
 
     @discord.ui.button(emoji="🔁", label="循環", style=discord.ButtonStyle.secondary, row=0, custom_id="music_loop")
     async def toggle_loop(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.state.last_active = time.time()
         modes = ['off', 'single', 'queue']
         idx = modes.index(self.state.loop_mode)
         self.state.loop_mode = modes[(idx + 1) % len(modes)]
@@ -112,7 +120,8 @@ class MusicControllerView(discord.ui.View):
         if not has_dj_permission(interaction, self.state):
             await interaction.response.send_message(t('dj_permission_denied', interaction, role_id=self.state.dj_role_id), ephemeral=True)
             return
-        vc = interaction.guild.voice_client
+        vc = self._get_vc(interaction)
+        self.state.last_active = time.time()
         self.state.cleanup()
         await safe_stop(vc)
         await safe_disconnect(vc)
@@ -121,10 +130,11 @@ class MusicControllerView(discord.ui.View):
 
     @discord.ui.button(label="-10%", emoji="🔉", style=discord.ButtonStyle.secondary, row=1, custom_id="music_vol_down")
     async def volume_down(self, interaction: discord.Interaction, button: discord.ui.Button):
-        vc = interaction.guild.voice_client
+        vc = self._get_vc(interaction)
         if not vc:
             await interaction.response.send_message(t('not_playing', interaction), ephemeral=True)
             return
+        self.state.last_active = time.time()
         self.state.volume = max(0.0, round(self.state.volume - 0.1, 2))
         save_guild_setting(self.state.guild_id, "volume", self.state.volume)
         if hasattr(vc, 'source') and hasattr(vc.source, 'volume'):
@@ -134,10 +144,11 @@ class MusicControllerView(discord.ui.View):
 
     @discord.ui.button(label="+10%", emoji="🔊", style=discord.ButtonStyle.secondary, row=1, custom_id="music_vol_up")
     async def volume_up(self, interaction: discord.Interaction, button: discord.ui.Button):
-        vc = interaction.guild.voice_client
+        vc = self._get_vc(interaction)
         if not vc:
             await interaction.response.send_message(t('not_playing', interaction), ephemeral=True)
             return
+        self.state.last_active = time.time()
         self.state.volume = min(2.0, round(self.state.volume + 0.1, 2))
         save_guild_setting(self.state.guild_id, "volume", self.state.volume)
         if hasattr(vc, 'source') and hasattr(vc.source, 'volume'):

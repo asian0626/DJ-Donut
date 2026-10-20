@@ -10,9 +10,9 @@ services:
       - .env
     volumes:
       - ./.env:/app/.env:ro
+      - ./guild_settings.json:/app/guild_settings.json
     depends_on:
-      lavalink:
-        condition: service_healthy
+      - lavalink
 
   # Optional: Embedded High-Performance Lavalink v4 Audio Node
   lavalink:
@@ -24,7 +24,7 @@ services:
     volumes:
       - ./lavalink/application.yml:/opt/Lavalink/application.yml:ro
     ports:
-      - "2333:2333"
+      - "127.0.0.1:2333:2333"
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:2333/version || exit 1"]
       interval: 10s

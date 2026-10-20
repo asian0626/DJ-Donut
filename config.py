@@ -13,7 +13,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-__version__ = "1.5.3"
+__version__ = "1.5.4"
 
 logging.basicConfig(
     level=logging.INFO,
@@ -80,6 +80,7 @@ BASSBOOST_PRESETS = {
 
 EQ_PRESETS = {
     "reset": {"label": "原音直通 (Flat)", "ffmpeg": None},
+    "bass": {"label": "🔊 重低音強化 (Bass Boost)", "ffmpeg": "bass=g=8:f=110:w=0.6"},
     "rock": {"label": "🎸 搖滾 (Rock)", "ffmpeg": "firequalizer=gain_entry='entry(60,4);entry(170,3);entry(310,0);entry(600,-2);entry(1000,-1);entry(3000,1);entry(6000,3);entry(12000,4);entry(14000,4);entry(16000,4)'"},
     "pop": {"label": "🎤 流行 (Pop)", "ffmpeg": "firequalizer=gain_entry='entry(60,-1);entry(170,1);entry(310,3);entry(600,4);entry(1000,4);entry(3000,2);entry(6000,0);entry(12000,-1);entry(14000,-1);entry(16000,-1)'"},
     "vocal": {"label": "🎙️ 人聲清晰 (Vocal Boost)", "ffmpeg": "firequalizer=gain_entry='entry(60,-3);entry(170,-1);entry(310,1);entry(600,3);entry(1000,4);entry(3000,4);entry(6000,3);entry(12000,1);entry(14000,0);entry(16000,-1)'"},
@@ -142,7 +143,8 @@ def get_ytdl_opts(extract_flat: bool = False, noplaylist: bool = True) -> dict:
         opts['cookiefile'] = COOKIE_FILE
     return opts
 
-MEDIA_EXECUTOR = ThreadPoolExecutor(max_workers=10, thread_name_prefix='media_worker')
+MEDIA_EXECUTOR = ThreadPoolExecutor(max_workers=25, thread_name_prefix='media_worker')
+API_EXECUTOR = ThreadPoolExecutor(max_workers=10, thread_name_prefix='api_worker')
 _LOCAL_STORAGE = threading.local()
 
 def get_thread_ytdl(extract_flat: bool = False, noplaylist: bool = True) -> yt_dlp.YoutubeDL:
@@ -221,7 +223,7 @@ _HTTP_SESSION: Optional[aiohttp.ClientSession] = None
 async def get_http_session() -> aiohttp.ClientSession:
     global _HTTP_SESSION
     if _HTTP_SESSION is None or _HTTP_SESSION.closed:
-        connector = aiohttp.TCPConnector(limit=50, ttl_dns_cache=300, ssl=False)
+        connector = aiohttp.TCPConnector(limit=50, ttl_dns_cache=300)
         timeout = aiohttp.ClientTimeout(total=15, connect=5)
         _HTTP_SESSION = aiohttp.ClientSession(connector=connector, timeout=timeout)
     return _HTTP_SESSION
@@ -232,27 +234,42 @@ async def close_http_session():
         await _HTTP_SESSION.close()
         _HTTP_SESSION = None
 
+_GUILD_SETTINGS_CACHE: Optional[dict] = None
+
 def load_all_guild_settings() -> dict:
-    if os.path.exists(SETTINGS_FILE):
-        try:
-            with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            return {}
-    return {}
+    global _GUILD_SETTINGS_CACHE
+    with _SETTINGS_LOCK:
+        if _GUILD_SETTINGS_CACHE is not None:
+            return dict(_GUILD_SETTINGS_CACHE)
+        if os.path.exists(SETTINGS_FILE):
+            try:
+                with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
+                    _GUILD_SETTINGS_CACHE = json.load(f)
+                    return dict(_GUILD_SETTINGS_CACHE)
+            except Exception as e:
+                logger.warning(f"[Settings Load Warning] {e}")
+                return {}
+        _GUILD_SETTINGS_CACHE = {}
+        return {}
 
 def save_guild_setting(guild_id: int, key: str, value: Any):
+    global _GUILD_SETTINGS_CACHE
     with _SETTINGS_LOCK:
         try:
-            data = load_all_guild_settings()
+            if _GUILD_SETTINGS_CACHE is None:
+                load_all_guild_settings()
+            data = _GUILD_SETTINGS_CACHE if _GUILD_SETTINGS_CACHE is not None else {}
             gid = str(guild_id)
             if gid not in data:
                 data[gid] = {}
             data[gid][key] = value
-            with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
+            _GUILD_SETTINGS_CACHE = data
+            temp_file = SETTINGS_FILE + ".tmp"
+            with open(temp_file, "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
-        except Exception:
-            pass
+            os.replace(temp_file, SETTINGS_FILE)
+        except Exception as e:
+            logger.error(f"[Settings Save Error] {e}")
 
 load_guild_settings = load_all_guild_settings
 

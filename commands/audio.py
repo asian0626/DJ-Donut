@@ -111,7 +111,13 @@ def register_audio_commands(tree: app_commands.CommandTree):
                     return
                 if error:
                     logger.error(f"[{b.node_name} Player Error] {error}")
-                asyncio.run_coroutine_threadsafe(play_next(b, bot_guild), b.loop)
+                fut = asyncio.run_coroutine_threadsafe(play_next(b, bot_guild), b.loop)
+                def _done(f):
+                    try:
+                        f.result()
+                    except Exception as err:
+                        logger.error(f"[{b.node_name} Seek AfterCallback Error] {err}")
+                fut.add_done_callback(_done)
 
             if hasattr(vc, 'channel') and vc.channel and hasattr(vc.channel, 'bitrate') and vc.channel.bitrate:
                 target_bps = min(384000, max(64000, vc.channel.bitrate))
@@ -138,9 +144,15 @@ def register_audio_commands(tree: app_commands.CommandTree):
             state.paused_duration = 0.0
             state.pause_timestamp = 0.0
             state.is_seeking = False
+            state.last_active = time.time()
             await interaction.followup.send(t('seek_success', interaction, time_str=format_duration(target_sec)))
         except Exception as e:
             state.is_seeking = False
+            try:
+                if 'buffered_source' in locals() and buffered_source:
+                    buffered_source.cleanup()
+            except Exception:
+                pass
             await interaction.followup.send(f"❌ 跳轉執行失敗: `{e}`", ephemeral=True)
 
     @tree.command(name="pause", description="暫停當前語音房的音樂播放 (Pause playback)")

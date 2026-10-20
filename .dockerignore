@@ -1,0 +1,11 @@
+.env
+.git
+.gitignore
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.DS_Store
+*.log
+guild_settings.json.bak
+.pytest_cache

@@ -2,7 +2,7 @@
 
 <div align="center">
 
-![Version](https://img.shields.io/badge/Version-v1.5.3-blue?logo=git)
+![Version](https://img.shields.io/badge/Version-v1.5.4-blue?logo=git)
 ![Python](https://img.shields.io/badge/Python-3.10%20%7C%203.11%20%7C%203.12-3776AB?logo=python&logoColor=white)
 ![Discord.py](https://img.shields.io/badge/Discord.py-v2.7.0%2B-5865F2?logo=discord&logoColor=white)
 ![Lavalink](https://img.shields.io/badge/Lavalink-v4.0%2B-FF3366?logo=audacity&logoColor=white)
@@ -228,6 +228,17 @@ discord-music-bot/
 ---
 
 ## Changelog
+
+### v1.5.4 (2026-10-20)
+- **Multi-Node Voice Cross-Talk Elimination**: Fixed interactive controller buttons (`play/pause`, `skip`, `stop`, `replay`, `volume`) routing commands to incorrect nodes by dynamically resolving voice clients from the targeted node bot rather than the default guild client.
+- **Zero-Latency Audio Clock (Non-Blocking Buffer)**: Completely eradicated micro-stutters and Discord audio thread stalls by converting `BufferedAudioSource.read()` to non-blocking `get_nowait()`, reliably serving silent Opus packets on buffer underflows without blocking the critical 20ms timing loop.
+- **Thread Pool Scaling & API Isolation**: Scaled `MEDIA_EXECUTOR` to 25 parallel workers and introduced a dedicated `API_EXECUTOR` for platform metadata resolution (Spotify, Apple Music, NetEase), preventing HTTP latency from choking FFmpeg and yt-dlp audio decoding tasks.
+- **Atomic Guild Settings Persistence**: Replaced direct file writes with an atomic temp-file replace pattern (`tempfile` + `os.replace`) backed by an in-memory cache, eliminating settings file corruption during concurrent guild writes.
+- **Autonomous Empty Room Detection & 24/7 Guard**: Implemented robust empty-room auto-leave with a 60-second grace period and join cancellation, while honoring 24/7 persistent mode and cleaning up guild state on bot eviction (`on_guild_remove`).
+- **Dynamic Multi-Bot Invite Generator**: Upgraded `/status` cluster dashboard to dynamically compute OAuth2 invite URLs directly from live client IDs, ensuring self-hosters and custom deployments get accurate invite links for all node bots.
+- **Autocomplete Throttling & Suggestion Cache**: Added a 120-second TTL LRU cache for Google Suggest queries in `/play` and `/search` autocomplete, dramatically slashing redundant API roundtrips during rapid user keystrokes.
+- **Security & Docker Hardening**: Added `.dockerignore` to secure sensitive `.env` credentials, migrated Docker container execution to an unprivileged non-root user (`botuser`), restricted Lavalink exposure to local loopback (`127.0.0.1`), and enabled persistent settings volume mounting.
+- **Audio DSP & Preset Fixes**: Corrected `/filter` bass boost preset mapping and pre-loaded guild language configurations on bot startup.
 
 ### v1.5.3 (2026-10-18)
 - **Admin Kick & Voice Disconnect Recovery**: Fully handled voice disconnect events (`VOICE_STATE_UPDATE` where `after.channel is None`) by cleanly disconnecting and deregistering the `VoiceClient` from discord.py's internal connection state, completely preventing `ClientException: Already connected to a voice channel for this guild` on subsequent `/play` commands.

@@ -43,9 +43,6 @@ Thumbs.db
 *.swp
 *.swo
 
-# Docker
-.dockerignore
-
 # Cache
 .cache
 .cache*

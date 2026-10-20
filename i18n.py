@@ -716,3 +716,20 @@ def t(
         except Exception:
             return text
     return text
+
+
+def init_guild_languages():
+    try:
+        from config import load_all_guild_settings
+        settings = load_all_guild_settings()
+        for gid_str, cfg in settings.items():
+            if isinstance(cfg, dict) and "language" in cfg:
+                try:
+                    GUILD_LANGUAGES[int(gid_str)] = cfg["language"]
+                except (ValueError, TypeError):
+                    pass
+    except Exception:
+        pass
+
+
+init_guild_languages()

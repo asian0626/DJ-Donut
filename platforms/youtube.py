@@ -52,13 +52,9 @@ def extract_stream_url_sync(song_url: str, song_title: str) -> Tuple[Optional[st
         cached = get_cached_stream(song_url)
         if cached:
             return cached
-    if song_title:
-        cached = get_cached_stream(song_title)
-        if cached:
-            return cached
 
     stream_url, thumb, dur = None, None, 0
-    backoffs = [0.5, 1.2, 2.5]
+    backoffs = [0.3, 0.8]
 
     if song_url and not ("spotify.com" in song_url or song_url.startswith("spotify:")):
         for attempt, delay in enumerate(backoffs):
@@ -68,7 +64,8 @@ def extract_stream_url_sync(song_url: str, song_title: str) -> Tuple[Optional[st
                 stream_url, thumb, dur = _extract_media_info(data)
                 if stream_url:
                     break
-            except Exception:
+            except Exception as e:
+                logger.debug(f"[YTDL URL Extract Error] {e}")
                 if attempt < len(backoffs) - 1:
                     time.sleep(delay)
 
@@ -80,7 +77,8 @@ def extract_stream_url_sync(song_url: str, song_title: str) -> Tuple[Optional[st
                 stream_url, thumb, dur = _extract_media_info(yt_data)
                 if stream_url:
                     break
-            except Exception:
+            except Exception as e:
+                logger.debug(f"[YTDL Title Search Error] {e}")
                 if attempt < len(backoffs) - 1:
                     time.sleep(delay)
 
@@ -92,8 +90,8 @@ def extract_stream_url_sync(song_url: str, song_title: str) -> Tuple[Optional[st
                 ydl_yt2 = get_thread_ytdl(extract_flat=False, noplaylist=True)
                 yt_data2 = ydl_yt2.extract_info(f"ytsearch5:{clean_title}", download=False)
                 stream_url, thumb, dur = _extract_media_info(yt_data2)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"[YTDL Clean Search Error] {e}")
 
     if not stream_url and song_title:
         try:
@@ -101,14 +99,12 @@ def extract_stream_url_sync(song_url: str, song_title: str) -> Tuple[Optional[st
             ydl_sc = get_thread_ytdl(extract_flat=False, noplaylist=True)
             sc_data = ydl_sc.extract_info(sc_query, download=False)
             stream_url, thumb, dur = _extract_media_info(sc_data)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[SC Search Error] {e}")
 
     if stream_url:
         if song_url:
             set_cached_stream(song_url, stream_url, thumb, dur)
-        if song_title:
-            set_cached_stream(song_title, stream_url, thumb, dur)
         return stream_url, thumb, dur
 
     return None, None, 0

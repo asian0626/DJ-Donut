@@ -69,7 +69,8 @@ def register_admin_commands(tree: app_commands.CommandTree):
             g_vc = (guild.voice_client if guild else None) or discord.utils.get(getattr(b, 'voice_clients', []), guild__id=guild_id)
 
             if not guild:
-                invite_link = INVITE_URLS.get(idx, "")
+                bot_id = b.application_id or (b.user.id if b.user else None)
+                invite_link = f"https://discord.com/oauth2/authorize?client_id={bot_id}&permissions=8&integration_type=0&scope=bot" if bot_id else INVITE_URLS.get(idx, "")
                 link_text = f"> 🔗 [點此邀請 {idx} 號機器人進群]({invite_link})" if invite_link else "> 尚未加入此伺服器"
                 embed.add_field(
                     name=f"⚪ 【{b.node_name}】未加入此伺服器",

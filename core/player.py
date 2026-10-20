@@ -61,6 +61,7 @@ async def play_next(bot: Any, guild: discord.Guild):
     state = bot.get_state(guild.id)
     vc = guild.voice_client
 
+    state.last_active = time.time()
     state.cancel_progress_task()
 
     if not vc or not is_vc_connected(vc):
@@ -94,6 +95,7 @@ async def play_next(bot: Any, guild: discord.Guild):
             if not state.queue:
                 state.current = None
                 state.is_playing = False
+                state.last_active = time.time()
                 state.cancel_progress_task()
                 if state.text_channel:
                     try:
@@ -194,6 +196,8 @@ async def play_next(bot: Any, guild: discord.Guild):
 
         if not stream_url:
             state.consecutive_failures += 1
+            if state.loop_mode == 'single' and state.queue and state.queue[0] == next_song:
+                state.queue.popleft()
             logger.warning(f"[{bot.node_name}] 無法提取串流: {next_song.title} (連續失敗: {state.consecutive_failures})，自動嘗試下一首...")
             if state.consecutive_failures >= 5:
                 state.is_playing = False
@@ -261,8 +265,10 @@ async def play_next(bot: Any, guild: discord.Guild):
                                 pass
 
             if is_vc_playing(vc) or is_vc_paused(vc):
+                state.is_seeking = True
                 await safe_stop(vc)
                 await asyncio.sleep(0.05)
+                state.is_seeking = False
 
             if hasattr(vc, 'play'):
                 if asyncio.iscoroutinefunction(vc.play):
@@ -290,6 +296,12 @@ async def play_next(bot: Any, guild: discord.Guild):
 
         except Exception as e:
             logger.error(f"[{bot.node_name} Play Error] 播放失敗: {e}")
+            state.is_seeking = False
+            try:
+                if 'buffered_source' in locals() and buffered_source:
+                    buffered_source.cleanup()
+            except Exception:
+                pass
             if next_song.url:
                 invalidate_cached_stream(next_song.url)
             if next_song.title:

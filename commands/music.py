@@ -1,7 +1,8 @@
 import asyncio
 import re
+import time
 from collections import deque
-from typing import Optional, List
+from typing import Optional, List, Dict, Tuple
 import discord
 from discord import app_commands
 import urllib.parse
@@ -48,6 +49,8 @@ from ui.views import (
     MusicControllerView,
     SearchSelectView
 )
+
+_AUTOCOMPLETE_CACHE: Dict[str, Tuple[List[str], float]] = {}
 
 def register_music_commands(tree: app_commands.CommandTree):
     @tree.command(name="play", description="智能點播歌曲（自動分流派發至空閒的機器人進房播放）")
@@ -456,19 +459,32 @@ def register_music_commands(tree: app_commands.CommandTree):
         cur_stripped = current.strip()
 
         if cur_stripped:
-            try:
-                session = await get_http_session()
-                q_enc = urllib.parse.quote(cur_stripped)
-                api_url = f"https://suggestqueries.google.com/complete/search?client=firefox&ds=yt&q={q_enc}"
-                async with session.get(api_url, timeout=1.0) as resp:
-                    if resp.status == 200:
-                        data = await resp.json(content_type=None)
-                        if isinstance(data, list) and len(data) > 1 and isinstance(data[1], list):
-                            for s in data[1][:7]:
-                                if s and s not in [c.value for c in choices]:
-                                    choices.append(app_commands.Choice(name=f"🔍 {s[:95]}", value=s[:100]))
-            except Exception:
-                pass
+            now = time.time()
+            cached_entry = _AUTOCOMPLETE_CACHE.get(cur_stripped)
+            if cached_entry and (now - cached_entry[1] < 120.0):
+                for s in cached_entry[0]:
+                    choices.append(app_commands.Choice(name=f"🔍 {s[:95]}", value=s[:100]))
+            else:
+                try:
+                    session = await get_http_session()
+                    q_enc = urllib.parse.quote(cur_stripped)
+                    api_url = f"https://suggestqueries.google.com/complete/search?client=firefox&ds=yt&q={q_enc}"
+                    async with session.get(api_url, timeout=1.0) as resp:
+                        if resp.status == 200:
+                            data = await resp.json(content_type=None)
+                            if isinstance(data, list) and len(data) > 1 and isinstance(data[1], list):
+                                raw_suggestions = []
+                                for s in data[1][:7]:
+                                    if s and s not in raw_suggestions:
+                                        raw_suggestions.append(s)
+                                        choices.append(app_commands.Choice(name=f"🔍 {s[:95]}", value=s[:100]))
+                                _AUTOCOMPLETE_CACHE[cur_stripped] = (raw_suggestions, now)
+                                if len(_AUTOCOMPLETE_CACHE) > 500:
+                                    oldest_keys = sorted(_AUTOCOMPLETE_CACHE.keys(), key=lambda k: _AUTOCOMPLETE_CACHE[k][1])[:100]
+                                    for ok in oldest_keys:
+                                        _AUTOCOMPLETE_CACHE.pop(ok, None)
+                except Exception:
+                    pass
 
         if state and state.history:
             seen = set()

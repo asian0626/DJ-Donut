@@ -45,7 +45,7 @@ class BufferedAudioSource(discord.AudioSource):
                     break
                 while not self._stop_event.is_set():
                     try:
-                        self.buffer.put(data, timeout=0.2)
+                        self.buffer.put(data, timeout=0.1)
                         break
                     except queue.Full:
                         continue
@@ -59,25 +59,12 @@ class BufferedAudioSource(discord.AudioSource):
     def read(self) -> bytes:
         if self._stop_event.is_set():
             return b''
-        if not self._started:
-            self._started = True
-            start_wait = time.time()
-            while time.time() - start_wait < 2.0:
-                if self._stop_event.is_set() or self._finished or self.buffer.qsize() >= self.prefetch_frames:
-                    break
-                time.sleep(0.02)
         try:
-            return self.buffer.get(timeout=0.5)
+            return self.buffer.get_nowait()
         except queue.Empty:
             if self._finished and self.buffer.empty():
                 return b''
             return bytes(3840)
-
-    def __del__(self):
-        try:
-            self.cleanup()
-        except Exception:
-            pass
 
     def cleanup(self):
         self._stop_event.set()
@@ -156,7 +143,11 @@ class GuildMusicState:
             self.progress_task.cancel()
             self.progress_task = None
 
+    def touch(self):
+        self.last_active = time.time()
+
     def cleanup(self):
+        self.last_active = time.time()
         self.cancel_progress_task()
         if self.current_view:
             try:
@@ -292,7 +283,13 @@ async def safe_pause_resume(vc, state: Optional['GuildMusicState'] = None, bot: 
                         if error:
                             logger.error(f"[{bot.node_name if hasattr(bot, 'node_name') else 'Bot'} Player Error] {error}")
                         from core.player import play_next
-                        asyncio.run_coroutine_threadsafe(play_next(bot, guild), bot.loop)
+                        fut = asyncio.run_coroutine_threadsafe(play_next(bot, guild), bot.loop)
+                        def _done(f):
+                            try:
+                                f.result()
+                            except Exception as err:
+                                logger.error(f"[Resume AfterCallback Error] {err}")
+                        fut.add_done_callback(_done)
 
                     vc.play(audio_source, after=after_callback)
                     state.start_time = time.time() - current_sec
@@ -303,6 +300,11 @@ async def safe_pause_resume(vc, state: Optional['GuildMusicState'] = None, bot: 
             except Exception as e:
                 logger.error(f"[Resume Reanchor Error] {e}")
                 state.is_seeking = False
+                try:
+                    if 'buffered_source' in locals() and buffered_source:
+                        buffered_source.cleanup()
+                except Exception:
+                    pass
 
         if hasattr(vc, 'resume') and callable(vc.resume):
             vc.resume()

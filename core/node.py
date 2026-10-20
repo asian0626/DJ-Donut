@@ -151,6 +151,42 @@ class MusicNodeBot(commands.Bot):
                     pass
             return
 
+        bg = self.get_guild(guild.id) or guild
+        vc = (bg.voice_client if bg else None) or discord.utils.get(getattr(self, 'voice_clients', []), guild__id=guild.id)
+        if not vc or not is_vc_connected(vc) or not vc.channel:
+            return
+
+        state = self.get_state(guild.id)
+        if after.channel == vc.channel and not member.bot:
+            t_task = getattr(state, '_auto_leave_task', None)
+            if t_task and not t_task.done():
+                t_task.cancel()
+                state._auto_leave_task = None
+
+        if before.channel == vc.channel and after.channel != vc.channel:
+            humans = [m for m in vc.channel.members if not m.bot]
+            if len(humans) == 0 and not state.mode_247:
+                t_task = getattr(state, '_auto_leave_task', None)
+                if not t_task or t_task.done():
+                    async def _auto_leave_coro():
+                        try:
+                            await asyncio.sleep(60)
+                            if vc and is_vc_connected(vc) and vc.channel:
+                                cur_humans = [m for m in vc.channel.members if not m.bot]
+                                if len(cur_humans) == 0 and not state.mode_247:
+                                    state.cleanup()
+                                    from core.models import safe_stop, safe_disconnect
+                                    await safe_stop(vc)
+                                    await safe_disconnect(vc)
+                        except asyncio.CancelledError:
+                            pass
+                    state._auto_leave_task = self.loop.create_task(_auto_leave_coro())
+
+    async def on_guild_remove(self, guild: discord.Guild):
+        st = self.states.pop(guild.id, None)
+        if st:
+            st.cleanup()
+
     async def _periodic_state_cleanup(self):
         await self.wait_until_ready()
         while not self.is_closed():

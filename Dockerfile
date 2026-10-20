@@ -27,5 +27,9 @@ RUN pip install --no-cache-dir --upgrade pip && \
 # Copy project files
 COPY . .
 
+# Run as non-root user for security
+RUN useradd -m -u 1000 botuser && chown -R botuser:botuser /app
+USER botuser
+
 # Run the cluster entry point
 CMD ["python3", "main.py"]
