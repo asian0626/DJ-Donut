@@ -4,7 +4,6 @@ import time
 import threading
 import queue
 import re
-import subprocess
 from collections import deque
 from typing import Optional, Dict, List, Any
 from config import (
@@ -184,11 +183,13 @@ class GuildMusicState:
 def is_vc_connected(vc) -> bool:
     if not vc:
         return False
-    if hasattr(vc, 'connected'):
-        return bool(vc.connected)
+    if getattr(vc, 'channel', None) is None:
+        return False
     if hasattr(vc, 'is_connected') and callable(vc.is_connected):
         return bool(vc.is_connected())
-    return hasattr(vc, 'channel') and vc.channel is not None
+    if hasattr(vc, 'connected'):
+        return bool(vc.connected)
+    return True
 
 def is_vc_playing(vc) -> bool:
     if not vc:
@@ -257,7 +258,7 @@ async def safe_pause_resume(vc, state: Optional['GuildMusicState'] = None, bot: 
                         if target_ch:
                             vc = await safe_voice_connect(bot, target_ch)
                     ffmpeg_opts = get_ffmpeg_options(state, seek_seconds=current_sec)
-                    source = discord.FFmpegPCMAudio(stream_url, stderr=subprocess.DEVNULL, **ffmpeg_opts)
+                    source = discord.FFmpegPCMAudio(stream_url, **ffmpeg_opts)
                     buffered_source = BufferedAudioSource(source, prefetch_frames=50, max_frames=500)
                     audio_source = discord.PCMVolumeTransformer(buffered_source, volume=state.volume)
 
@@ -342,7 +343,10 @@ async def safe_disconnect(vc):
         return
     try:
         await safe_stop(vc)
-        if hasattr(vc, 'disconnect'):
+    except Exception:
+        pass
+    if hasattr(vc, 'disconnect'):
+        try:
             if asyncio.iscoroutinefunction(vc.disconnect):
                 try:
                     await vc.disconnect(force=True)
@@ -353,11 +357,14 @@ async def safe_disconnect(vc):
                     vc.disconnect(force=True)
                 except TypeError:
                     vc.disconnect()
-        if hasattr(vc, 'cleanup') and callable(vc.cleanup):
-            try:
-                vc.cleanup()
-            except Exception:
-                pass
+        except Exception:
+            pass
+    if hasattr(vc, 'cleanup') and callable(vc.cleanup):
+        try:
+            vc.cleanup()
+        except Exception:
+            pass
+    try:
         client = getattr(vc, 'client', None)
         guild = getattr(vc, 'guild', None)
         if client and guild:
@@ -370,10 +377,13 @@ async def safe_disconnect(vc):
                     vcs.remove(vc)
                 except Exception:
                     pass
-        if hasattr(vc, 'channel'):
+    except Exception:
+        pass
+    if hasattr(vc, 'channel'):
+        try:
             vc.channel = None
-    except Exception as e:
-        logger.error(f"[Safe Disconnect Error] {e}")
+        except Exception:
+            pass
 
 async def safe_voice_connect(bot: Any, voice_channel: discord.VoiceChannel, timeout: float = 30.0, cls: Any = None) -> Any:
     guild_id = voice_channel.guild.id

@@ -2,7 +2,7 @@
 
 <div align="center">
 
-![Version](https://img.shields.io/badge/Version-v1.5.4-blue?logo=git)
+![Version](https://img.shields.io/badge/Version-v1.5.5-blue?logo=git)
 ![Python](https://img.shields.io/badge/Python-3.10%20%7C%203.11%20%7C%203.12-3776AB?logo=python&logoColor=white)
 ![Discord.py](https://img.shields.io/badge/Discord.py-v2.7.0%2B-5865F2?logo=discord&logoColor=white)
 ![Lavalink](https://img.shields.io/badge/Lavalink-v4.0%2B-FF3366?logo=audacity&logoColor=white)
@@ -228,6 +228,11 @@ discord-music-bot/
 ---
 
 ## Changelog
+
+### v1.5.5 (2026-10-20)
+- **Eliminate FFmpeg Pipe Reader Write Error**: Removed invalid `stderr=subprocess.DEVNULL` parameter in `FFmpegPCMAudio` across `core/player.py`, `core/models.py`, and `commands/audio.py`. In discord.py, passing an integer to `stderr` causes the internal `_pipe_reader` thread to attempt `dest.write(data)` on an `int`, crashing with `AttributeError: 'int' object has no attribute 'write'`. FFmpeg output is already cleanly suppressed via `-nostats -loglevel fatal`.
+- **Bulletproof Voice Disconnect & Reconnect Handling**: Hardened `safe_disconnect` against `AttributeError: 'NoneType' object has no attribute '_get_voice_client_key'` when `vc.channel` is already `None` following Discord voice WebSocket drops (`code 1006`), ensuring internal discord.py voice client tracking maps (`_connection._voice_clients`) are reliably pruned without raising unhandled exceptions.
+- **Accurate Voice Connection Validation**: Added explicit `vc.channel is None` check to `is_vc_connected` to immediately identify severed voice sessions before attempting move or play operations.
 
 ### v1.5.4 (2026-10-20)
 - **Multi-Node Voice Cross-Talk Elimination**: Fixed interactive controller buttons (`play/pause`, `skip`, `stop`, `replay`, `volume`) routing commands to incorrect nodes by dynamically resolving voice clients from the targeted node bot rather than the default guild client.

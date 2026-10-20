@@ -1,6 +1,5 @@
 import asyncio
 import time
-import subprocess
 from typing import Optional
 import discord
 from discord import app_commands
@@ -102,7 +101,7 @@ def register_audio_commands(tree: app_commands.CommandTree):
 
         try:
             ffmpeg_opts = get_ffmpeg_options(state, seek_seconds=target_sec)
-            source = discord.FFmpegPCMAudio(stream_url, stderr=subprocess.DEVNULL, **ffmpeg_opts)
+            source = discord.FFmpegPCMAudio(stream_url, **ffmpeg_opts)
             buffered_source = BufferedAudioSource(source, prefetch_frames=50, max_frames=500)
             audio_source = discord.PCMVolumeTransformer(buffered_source, volume=state.volume)
 

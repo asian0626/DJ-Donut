@@ -1,7 +1,6 @@
 import discord
 import asyncio
 import time
-import subprocess
 from typing import Optional, Any
 from config import (
     HAS_WAVELINK,
@@ -226,7 +225,7 @@ async def play_next(bot: Any, guild: discord.Guild):
 
         try:
             ffmpeg_opts = get_ffmpeg_options(state)
-            source = discord.FFmpegPCMAudio(stream_url, stderr=subprocess.DEVNULL, **ffmpeg_opts)
+            source = discord.FFmpegPCMAudio(stream_url, **ffmpeg_opts)
             buffered_source = BufferedAudioSource(source, prefetch_frames=50, max_frames=500)
             audio_source = discord.PCMVolumeTransformer(buffered_source, volume=state.volume)
 
