@@ -13,7 +13,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-__version__ = "1.5.5"
+__version__ = "1.6.0"
 
 logging.basicConfig(
     level=logging.INFO,
@@ -276,6 +276,90 @@ load_guild_settings = load_all_guild_settings
 def get_guild_setting(guild_id: int, key: str, default: Any = None) -> Any:
     data = load_all_guild_settings()
     return data.get(str(guild_id), {}).get(key, default)
+
+def _save_settings_dict(data: dict):
+    global _GUILD_SETTINGS_CACHE
+    _GUILD_SETTINGS_CACHE = data
+    temp_file = SETTINGS_FILE + ".tmp"
+    with open(temp_file, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+    os.replace(temp_file, SETTINGS_FILE)
+
+def get_user_favorites(user_id: int) -> List[dict]:
+    data = load_all_guild_settings()
+    favs = data.get("_favorites", {})
+    if not isinstance(favs, dict):
+        return []
+    user_list = favs.get(str(user_id), [])
+    return list(user_list) if isinstance(user_list, list) else []
+
+def add_user_favorite(user_id: int, song_item: dict) -> Tuple[bool, int]:
+    global _GUILD_SETTINGS_CACHE
+    with _SETTINGS_LOCK:
+        if _GUILD_SETTINGS_CACHE is None:
+            load_all_guild_settings()
+        data = _GUILD_SETTINGS_CACHE if _GUILD_SETTINGS_CACHE is not None else {}
+        if "_favorites" not in data or not isinstance(data.get("_favorites"), dict):
+            data["_favorites"] = {}
+        uid = str(user_id)
+        if uid not in data["_favorites"] or not isinstance(data["_favorites"].get(uid), list):
+            data["_favorites"][uid] = []
+        cur_list = data["_favorites"][uid]
+        new_title = (song_item.get("title") or "").strip().lower()
+        new_url = (song_item.get("url") or "").strip()
+        for existing in cur_list:
+            if not isinstance(existing, dict):
+                continue
+            ex_url = (existing.get("url") or "").strip()
+            ex_title = (existing.get("title") or "").strip().lower()
+            if (new_url and ex_url == new_url) or (new_title and ex_title == new_title):
+                return False, len(cur_list)
+        if len(cur_list) >= 100:
+            cur_list.pop(0)
+        cur_list.append(song_item)
+        try:
+            _save_settings_dict(data)
+        except Exception as e:
+            logger.error(f"[Favorites Save Error] {e}")
+        return True, len(cur_list)
+
+def remove_user_favorite(user_id: int, index: int) -> Optional[dict]:
+    global _GUILD_SETTINGS_CACHE
+    with _SETTINGS_LOCK:
+        if _GUILD_SETTINGS_CACHE is None:
+            load_all_guild_settings()
+        data = _GUILD_SETTINGS_CACHE if _GUILD_SETTINGS_CACHE is not None else {}
+        favs = data.get("_favorites", {})
+        uid = str(user_id)
+        if not isinstance(favs, dict) or uid not in favs or not isinstance(favs[uid], list):
+            return None
+        cur_list = favs[uid]
+        if index < 1 or index > len(cur_list):
+            return None
+        removed = cur_list.pop(index - 1)
+        try:
+            _save_settings_dict(data)
+        except Exception as e:
+            logger.error(f"[Favorites Remove Error] {e}")
+        return removed
+
+def clear_user_favorites(user_id: int) -> int:
+    global _GUILD_SETTINGS_CACHE
+    with _SETTINGS_LOCK:
+        if _GUILD_SETTINGS_CACHE is None:
+            load_all_guild_settings()
+        data = _GUILD_SETTINGS_CACHE if _GUILD_SETTINGS_CACHE is not None else {}
+        favs = data.get("_favorites", {})
+        uid = str(user_id)
+        if not isinstance(favs, dict) or uid not in favs or not isinstance(favs[uid], list):
+            return 0
+        count = len(favs[uid])
+        favs[uid] = []
+        try:
+            _save_settings_dict(data)
+        except Exception as e:
+            logger.error(f"[Favorites Clear Error] {e}")
+        return count
 
 def parse_time_str(time_str: str) -> Optional[int]:
     time_str = time_str.strip()

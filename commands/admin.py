@@ -10,7 +10,7 @@ from config import (
     save_guild_setting
 )
 from i18n import t, GUILD_LANGUAGES
-from lyrics import get_lyrics
+from lyrics import get_lyrics_async, format_clean_lyrics
 from core.models import (
     is_vc_connected,
     is_vc_playing,
@@ -122,8 +122,9 @@ def register_admin_commands(tree: app_commands.CommandTree):
             inline=False
         )
         embed.add_field(
-            name="📑 隊列進階管理",
-            value="> `/move <來源> <目標>` — 自由調整隊列歌曲播放順序\n"
+            name="📑 隊列進階管理與個人收藏",
+            value="> `/favorite <動作>` — 管理與一鍵播放您的個人最愛收藏歌單\n"
+                  "> `/move <來源> <目標>` — 自由調整隊列歌曲播放順序\n"
                   "> `/seek <時間>` — 精確跳轉當前歌曲播放進度 (如: 90 或 01:30)\n"
                   "> `/shuffle` — 隨機打亂當前語音房的待播歌單隊列\n"
                   "> `/remove <編號>` — 移除待播清單中的指定序號歌曲\n"
@@ -355,6 +356,7 @@ def register_admin_commands(tree: app_commands.CommandTree):
         target_title = 歌曲
         target_artist = ""
 
+        cur_elapsed: Optional[float] = None
         if not target_title:
             voice_channel = await get_user_voice_channel(interaction)
             b = None
@@ -365,28 +367,29 @@ def register_admin_commands(tree: app_commands.CommandTree):
                 if state.current:
                     target_title = state.current.title
                     target_artist = state.current.uploader or ""
+                    cur_elapsed = float(get_playback_elapsed(state))
 
         if not target_title:
             await interaction.followup.send(t('not_playing', interaction))
             return
 
-        loop = asyncio.get_event_loop()
-        res = await loop.run_in_executor(MEDIA_EXECUTOR, lambda: get_lyrics(target_title, target_artist))
+        res = await get_lyrics_async(target_title, target_artist)
 
         if not res:
             await interaction.followup.send(t('lyrics_not_found', interaction, title=target_title))
             return
 
         display_title, lrc_text, is_synced = res
-        if len(lrc_text) > 4000:
-            lrc_text = lrc_text[:3990] + "\n..."
+        clean_body = format_clean_lyrics(lrc_text, is_synced, elapsed_sec=cur_elapsed)
+        if len(clean_body) > 4000:
+            clean_body = clean_body[:3990] + "\n..."
 
         embed = discord.Embed(
             title=t('lyrics_title', interaction, title=display_title),
-            description=lrc_text,
+            description=clean_body,
             color=0x1DB954 if is_synced else 0x3498DB
         )
-        sync_str = "⚡ 動態時間軸 (Synced)" if is_synced else "📝 純文字歌詞 (Plain)"
+        sync_str = "⚡ 動態時間軸高亮 (Synced Karaoke)" if is_synced else "📝 純文字歌詞 (Plain)"
         embed.set_footer(text=f"模式: {sync_str} | 資料庫: LRCLIB / Netease")
         await interaction.followup.send(embed=embed)
 

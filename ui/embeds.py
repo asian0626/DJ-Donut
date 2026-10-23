@@ -8,7 +8,9 @@ from config import (
     parse_time_str
 )
 from core.models import Song, GuildMusicState, get_playback_elapsed
+from lyrics import get_synced_lyrics_snippet
 from i18n import t, resolve_locale
+
 
 def make_progress_bar(elapsed: int, total: int, length: int = 14) -> str:
     if not total or total <= 0:
@@ -18,6 +20,7 @@ def make_progress_bar(elapsed: int, total: int, length: int = 14) -> str:
     pos = min(pos, length - 1)
     bar = "━" * pos + "🔘" + "─" * (length - 1 - pos)
     return f"`{format_duration(elapsed)}` {bar} `{format_duration(total)}`"
+
 
 def get_platform_badge(url: str, uploader: str) -> Tuple[str, int]:
     u = (url or "").lower()
@@ -38,7 +41,7 @@ def build_nowplaying_embed(bot: 'MusicNodeBot', song: Song, state: GuildMusicSta
     loop_str = t(f'loop_{state.loop_mode}', lang=guild_lang)
 
     guild = bot.get_guild(state.guild_id)
-    vc = guild.voice_client if guild else None
+    vc = (guild.voice_client if guild else None) or discord.utils.get(getattr(bot, 'voice_clients', []), guild__id=state.guild_id)
     bitrate_str = "128 kbps"
     if vc and hasattr(vc, 'channel') and vc.channel and hasattr(vc.channel, 'bitrate') and vc.channel.bitrate:
         bitrate_str = f"{vc.channel.bitrate // 1000} kbps"
@@ -59,6 +62,11 @@ def build_nowplaying_embed(bot: 'MusicNodeBot', song: Song, state: GuildMusicSta
     if song.thumbnail:
         embed.set_thumbnail(url=song.thumbnail)
 
+    if state.current_lyrics and state.current_lyrics[2]:
+        snippet = get_synced_lyrics_snippet(state.current_lyrics[1], elapsed, context_lines=1)
+        if snippet:
+            embed.add_field(name="🎤 即時動態歌詞 (Synced Karaoke)", value=snippet, inline=False)
+
     embed.add_field(name="👤 點播者", value=song.requester.mention, inline=True)
     embed.add_field(name="🔊 音量", value=f"`{int(state.volume * 100)}%`", inline=True)
     embed.add_field(name="🔁 循環模式", value=f"`{loop_str}`", inline=True)
@@ -68,11 +76,12 @@ def build_nowplaying_embed(bot: 'MusicNodeBot', song: Song, state: GuildMusicSta
 
     bot_name = bot.node_name
     embed.set_footer(
-        text=f"DJ Donut • {bot_name} • 48kHz / {bitrate_str} • EQ: {eq_label} • 重低音: {bb_label}"
+        text=f"DJ Donut v{__version__} • {bot_name} • 48kHz / {bitrate_str} • EQ: {eq_label} • 重低音: {bb_label}"
     )
     return embed
 
-def build_queue_embed(bot: 'MusicNodeBot', state: GuildMusicState, lang: Optional[str] = None) -> discord.Embed:
+
+def build_queue_embed(bot: 'MusicNodeBot', state: GuildMusicState, lang: Optional[str] = None, page: int = 1, per_page: int = 10) -> discord.Embed:
     guild_lang = lang or resolve_locale(guild_id=state.guild_id)
     embed = discord.Embed(
         title=f"📜 【{bot.node_name}】語音房待播清單",
@@ -92,19 +101,24 @@ def build_queue_embed(bot: 'MusicNodeBot', state: GuildMusicState, lang: Optiona
             value="*目前隊列為空，快使用 `/play` 點歌，或開啟 `/autoplay` 電台自動接歌！*",
             inline=False
         )
+        total_pages = 1
+        cur_page = 1
     else:
-        total_seconds = sum(s.duration for s in state.queue if s.duration)
+        q_list = list(state.queue)
+        total_items = len(q_list)
+        total_pages = max(1, (total_items + per_page - 1) // per_page)
+        cur_page = max(1, min(page, total_pages))
+        start_idx = (cur_page - 1) * per_page
+        end_idx = start_idx + per_page
+
+        total_seconds = sum(s.duration for s in q_list if s.duration)
         total_dur_str = format_duration(total_seconds) if total_seconds else "未知"
         queue_lines = []
-        for i, s in enumerate(list(state.queue)[:10], start=1):
+        for i, s in enumerate(q_list[start_idx:end_idx], start=start_idx + 1):
             s_dur = f"`{format_duration(s.duration)}`" if s.duration else "`直播`"
             queue_lines.append(f"`{i:02d}.` **[{s.title[:35]}]({s.url})** ({s_dur}) • {s.requester.mention}")
 
-        remaining = len(state.queue) - 10
-        if remaining > 0:
-            queue_lines.append(f"\n*...以及其他 **{remaining}** 首歌曲*")
-
-        header_meta = f"總計 `{len(state.queue)}` 首歌曲 • 預估總時長 `{total_dur_str}`\n\n"
+        header_meta = f"總計 `{total_items}` 首歌曲 • 預估總時長 `{total_dur_str}` • 第 `{cur_page}/{total_pages}` 頁\n\n"
         embed.add_field(
             name="📋 待播歌曲清單",
             value=header_meta + "\n".join(queue_lines),
@@ -113,9 +127,10 @@ def build_queue_embed(bot: 'MusicNodeBot', state: GuildMusicState, lang: Optiona
 
     loop_str = t(f'loop_{state.loop_mode}', lang=guild_lang)
     embed.set_footer(
-        text=f"🔁 循環: {loop_str} • 📻 自動接歌: {'開啟' if state.autoplay else '關閉'} • 🔊 音量: {int(state.volume * 100)}%"
+        text=f"第 {cur_page}/{total_pages} 頁 • 🔁 循環: {loop_str} • 📻 自動接歌: {'開啟' if state.autoplay else '關閉'} • 🔊 音量: {int(state.volume * 100)}%"
     )
     return embed
+
 
 def build_song_queued_embed(bot: 'MusicNodeBot', song: Song, state: GuildMusicState, pos: int, interaction: discord.Interaction) -> discord.Embed:
     platform_name, embed_color = get_platform_badge(song.url, song.uploader)
@@ -135,4 +150,3 @@ def build_song_queued_embed(bot: 'MusicNodeBot', song: Song, state: GuildMusicSt
     embed.add_field(name="🔊 音量設定", value=f"`{int(state.volume * 100)}%`", inline=True)
     embed.set_footer(text="DJ Donut • 輸入 /nowplaying 查看控制器 • /queue 查看待播清單")
     return embed
-

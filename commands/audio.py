@@ -19,7 +19,8 @@ from core.models import (
     is_vc_paused,
     safe_pause_resume,
     has_dj_permission,
-    safe_voice_connect
+    safe_voice_connect,
+    hot_swap_current_stream
 )
 from core.node import NODE_BOTS
 from core.dispatcher import (
@@ -324,7 +325,16 @@ def register_audio_commands(tree: app_commands.CommandTree):
             except Exception as e:
                 print(f"[Bassboost Error] {e}")
 
-        await interaction.response.send_message(f"🎛️ 【{b.node_name}】重低音已設為：**{choice_label}**！\n*(極限原生 FFmpeg 引擎將於切換或下首歌曲以 384k 精度套用)*")
+        if vc and (is_vc_playing(vc) or is_vc_paused(vc)) and state.current:
+            await interaction.response.defer()
+            swapped = await hot_swap_current_stream(b, bot_guild, vc, state)
+            if swapped:
+                await interaction.followup.send(f"🎛️ 【{b.node_name}】重低音已**原地秒級熱切換生效**：**{choice_label}**！(384k 錄音室級 DSP)")
+                return
+            await interaction.followup.send(f"🎛️ 【{b.node_name}】重低音已設為：**{choice_label}**！")
+            return
+
+        await interaction.response.send_message(f"🎛️ 【{b.node_name}】重低音已設為：**{choice_label}**！")
 
     @tree.command(name="filter", description="套用專業等化器音效濾鏡 (搖滾/流行/人聲/高音/Nightcore/8D等)")
     @app_commands.describe(音效="選擇要套用的音效預設")
@@ -374,7 +384,16 @@ def register_audio_commands(tree: app_commands.CommandTree):
             except Exception as e:
                 print(f"[Filter Error] {e}")
 
-        await interaction.response.send_message(f"🎛️ 【{b.node_name}】音效濾波器已切換至：**{choice_label}**！\n*(極限原生 FFmpeg 引擎將以 384k 錄音室級編碼套用)*")
+        if vc and (is_vc_playing(vc) or is_vc_paused(vc)) and state.current:
+            await interaction.response.defer()
+            swapped = await hot_swap_current_stream(b, bot_guild, vc, state)
+            if swapped:
+                await interaction.followup.send(f"🎛️ 【{b.node_name}】音效濾波器已**原地秒級熱切換生效**：**{choice_label}**！(384k 錄音室級編碼)")
+                return
+            await interaction.followup.send(f"🎛️ 【{b.node_name}】音效濾波器已切換至：**{choice_label}**！")
+            return
+
+        await interaction.response.send_message(f"🎛️ 【{b.node_name}】音效濾波器已切換至：**{choice_label}**！")
 
     @tree.command(name="engine", description="查看目前音訊引擎運作狀態 (Lavalink / 原生 FFmpeg)")
     async def slash_engine(interaction: discord.Interaction):

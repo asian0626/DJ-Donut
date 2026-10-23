@@ -7,6 +7,7 @@ from config import (
     BASSBOOST_PRESETS,
     MEDIA_EXECUTOR,
     get_ffmpeg_options,
+    is_stream_url_expired,
     invalidate_cached_stream,
     logger
 )
@@ -19,6 +20,7 @@ from core.models import (
     is_vc_paused,
     safe_stop,
     safe_disconnect,
+    safe_voice_connect,
     has_dj_permission,
     get_playback_elapsed
 )
@@ -28,6 +30,7 @@ from platforms.netease import NETEASE_URL_REGEX
 from platforms.apple_music import APPLE_MUSIC_URL_REGEX
 from ui.embeds import build_nowplaying_embed
 from ui.views import MusicControllerView
+from lyrics import get_lyrics_async
 from i18n import t
 
 try:
@@ -35,13 +38,14 @@ try:
 except ImportError:
     wavelink = None
 
+
 async def _progress_updater(bot: Any, guild: discord.Guild, state: GuildMusicState, song: Song, message: discord.Message):
     try:
         while state.is_playing and state.current == song:
             await asyncio.sleep(15)
             if not state.is_playing or state.current != song:
                 break
-            vc = guild.voice_client
+            vc = guild.voice_client or discord.utils.get(getattr(bot, 'voice_clients', []), guild__id=guild.id)
             if not vc or not is_vc_connected(vc) or is_vc_paused(vc):
                 continue
             embed = build_nowplaying_embed(bot, song, state)
@@ -56,24 +60,136 @@ async def _progress_updater(bot: Any, guild: discord.Guild, state: GuildMusicSta
     except Exception:
         pass
 
+
+async def _preload_and_lyrics_worker(bot: Any, guild: discord.Guild, state: GuildMusicState, song: Song):
+    try:
+        await asyncio.sleep(0.8)
+        if not state.is_playing or state.current != song:
+            return
+        lyrics_res = await get_lyrics_async(song.title, song.uploader or "")
+        if state.is_playing and state.current == song and lyrics_res:
+            state.current_lyrics = lyrics_res
+            if lyrics_res[2] and state.nowplaying_message:
+                try:
+                    embed = build_nowplaying_embed(bot, song, state)
+                    await state.nowplaying_message.edit(embed=embed)
+                except Exception:
+                    pass
+
+        await asyncio.sleep(2.5)
+        if not state.is_playing or state.current != song or not state.queue:
+            return
+        upcoming = state.queue[0]
+        if upcoming and (not getattr(upcoming, 'stream_url', '') or is_stream_url_expired(upcoming.stream_url)):
+            loop = asyncio.get_event_loop()
+            s_url, s_thumb, s_dur = await loop.run_in_executor(
+                MEDIA_EXECUTOR, lambda: extract_stream_url_sync(upcoming.url, upcoming.title)
+            )
+            if s_url:
+                upcoming.stream_url = s_url
+                if s_thumb and not upcoming.thumbnail:
+                    upcoming.thumbnail = s_thumb
+                if s_dur and not upcoming.duration:
+                    upcoming.duration = s_dur
+    except asyncio.CancelledError:
+        pass
+    except Exception:
+        pass
+
+
+async def _send_clean_nowplaying(bot: Any, guild: discord.Guild, state: GuildMusicState, song: Song):
+    if not state.text_channel:
+        return
+    if state.current_view:
+        try:
+            state.current_view.stop()
+        except Exception:
+            pass
+    state.cancel_progress_task()
+    state.cancel_preload_task()
+
+    old_msg = state.nowplaying_message
+    state.nowplaying_message = None
+    if old_msg:
+        try:
+            await old_msg.delete()
+        except Exception:
+            pass
+
+    embed = build_nowplaying_embed(bot, song, state)
+    view = MusicControllerView(bot, state)
+    state.current_view = view
+    try:
+        msg = await state.text_channel.send(embed=embed, view=view)
+        state.nowplaying_message = msg
+        state.progress_task = bot.loop.create_task(_progress_updater(bot, guild, state, song, msg))
+        state.preload_task = bot.loop.create_task(_preload_and_lyrics_worker(bot, guild, state, song))
+    except Exception:
+        pass
+
+
 async def play_next(bot: Any, guild: discord.Guild):
     state = bot.get_state(guild.id)
-    vc = guild.voice_client
+    vc = guild.voice_client or discord.utils.get(getattr(bot, 'voice_clients', []), guild__id=guild.id)
 
     state.last_active = time.time()
     state.cancel_progress_task()
+    state.cancel_preload_task()
+
+    interrupted_song: Optional[Song] = None
+    interrupted_sec: int = 0
+    if state.current and not state.skip_requested:
+        elapsed = get_playback_elapsed(state)
+        dur = state.current.duration or 0
+        if dur > 30 and 5 <= elapsed < (dur - 12) and state.resume_attempts < 2:
+            interrupted_song = state.current
+            interrupted_sec = elapsed
+
+    state.skip_requested = False
+
+    if not vc or not is_vc_connected(vc):
+        target_ch = state.voice_channel or (getattr(vc, 'channel', None) if vc else None)
+        if target_ch:
+            for _ in range(5):
+                await asyncio.sleep(0.5)
+                vc = guild.voice_client or discord.utils.get(getattr(bot, 'voice_clients', []), guild__id=guild.id)
+                if vc and is_vc_connected(vc):
+                    break
+            if not vc or not is_vc_connected(vc):
+                try:
+                    vc = await safe_voice_connect(bot, target_ch, timeout=20.0)
+                except Exception as reconn_err:
+                    logger.warning(f"[{bot.node_name}] 語音自動重連失敗: {reconn_err}")
+                    state.is_playing = False
+                    return
+        else:
+            state.is_playing = False
+            return
 
     if not vc or not is_vc_connected(vc):
         state.is_playing = False
         return
 
-    if state.current:
-        state.last_played = state.current
-        state.history.appendleft(state.current)
-        if state.loop_mode == 'single':
-            state.queue.appendleft(state.current)
-        elif state.loop_mode == 'queue':
-            state.queue.append(state.current)
+    if hasattr(vc, 'channel') and vc.channel:
+        state.voice_channel = vc.channel
+
+    if interrupted_song:
+        state.resume_attempts += 1
+        invalidate_cached_stream(interrupted_song.url)
+        invalidate_cached_stream(interrupted_song.title)
+        interrupted_song.stream_url = ''
+        state.queue.appendleft(interrupted_song)
+        seek_offset = interrupted_sec
+    else:
+        state.resume_attempts = 0
+        seek_offset = 0
+        if state.current:
+            state.last_played = state.current
+            state.history.appendleft(state.current)
+            if state.loop_mode == 'single':
+                state.queue.appendleft(state.current)
+            elif state.loop_mode == 'queue':
+                state.queue.append(state.current)
 
     while True:
         if not state.queue:
@@ -93,9 +209,11 @@ async def play_next(bot: Any, guild: discord.Guild):
 
             if not state.queue:
                 state.current = None
+                state.current_lyrics = None
                 state.is_playing = False
                 state.last_active = time.time()
                 state.cancel_progress_task()
+                state.cancel_preload_task()
                 if state.text_channel:
                     try:
                         await state.text_channel.send(t('queue_finished', guild_id=guild.id, bot_name=bot.node_name))
@@ -104,9 +222,11 @@ async def play_next(bot: Any, guild: discord.Guild):
                 return
 
         next_song = state.queue.popleft()
+        if state.current != next_song:
+            state.current_lyrics = None
         state.current = next_song
         state.is_playing = True
-        state.start_time = time.time()
+        state.start_time = time.time() - seek_offset
         state.paused_duration = 0.0
         state.pause_timestamp = 0.0
 
@@ -153,32 +273,17 @@ async def play_next(bot: Any, guild: discord.Guild):
                     if hasattr(vc, 'set_volume'):
                         await vc.set_volume(int(state.volume * 100))
 
-                    if state.text_channel:
-                        if state.current_view:
-                            try:
-                                state.current_view.stop()
-                            except Exception:
-                                pass
-                        state.cancel_progress_task()
-                        embed = build_nowplaying_embed(bot, next_song, state)
-                        view = MusicControllerView(bot, state)
-                        state.current_view = view
-                        try:
-                            msg = await state.text_channel.send(embed=embed, view=view)
-                            state.nowplaying_message = msg
-                            state.progress_task = bot.loop.create_task(_progress_updater(bot, guild, state, next_song, msg))
-                        except Exception:
-                            pass
+                    await _send_clean_nowplaying(bot, guild, state, next_song)
                     return
                 except Exception as e:
                     logger.warning(f"[{bot.node_name}] Lavalink 播放異常 ({e})，自動切換至極限原生獨立引擎...")
 
         if hasattr(vc, 'filters'):
-            channel = getattr(vc, 'channel', None)
+            channel = getattr(vc, 'channel', None) or state.voice_channel
             await safe_disconnect(vc)
             if channel:
                 try:
-                    vc = await channel.connect(reconnect=True, timeout=30.0, self_deaf=True)
+                    vc = await safe_voice_connect(bot, channel, timeout=30.0)
                 except Exception as conn_err:
                     logger.error(f"[{bot.node_name}] 切換原生語音客戶端失敗: {conn_err}")
                     state.is_playing = False
@@ -188,12 +293,19 @@ async def play_next(bot: Any, guild: discord.Guild):
                 return
 
         state.active_engine = "🔥 Native Studio Engine (384k VBR)"
-        loop = asyncio.get_event_loop()
-        stream_url, thumbnail, duration = await loop.run_in_executor(
-            MEDIA_EXECUTOR, lambda: extract_stream_url_sync(next_song.url, next_song.title)
-        )
+        preloaded_url = getattr(next_song, 'stream_url', '')
+        if preloaded_url and not is_stream_url_expired(preloaded_url):
+            stream_url = preloaded_url
+            thumbnail = next_song.thumbnail
+            duration = next_song.duration
+        else:
+            loop = asyncio.get_event_loop()
+            stream_url, thumbnail, duration = await loop.run_in_executor(
+                MEDIA_EXECUTOR, lambda: extract_stream_url_sync(next_song.url, next_song.title)
+            )
 
         if not stream_url:
+            seek_offset = 0
             state.consecutive_failures += 1
             if state.loop_mode == 'single' and state.queue and state.queue[0] == next_song:
                 state.queue.popleft()
@@ -202,6 +314,7 @@ async def play_next(bot: Any, guild: discord.Guild):
                 state.is_playing = False
                 state.current = None
                 state.cancel_progress_task()
+                state.cancel_preload_task()
                 if state.text_channel:
                     try:
                         await state.text_channel.send(t('stream_consecutive_failed', guild_id=guild.id))
@@ -224,7 +337,7 @@ async def play_next(bot: Any, guild: discord.Guild):
         next_song.stream_url = stream_url
 
         try:
-            ffmpeg_opts = get_ffmpeg_options(state)
+            ffmpeg_opts = get_ffmpeg_options(state, seek_seconds=seek_offset if seek_offset > 0 else None)
             source = discord.FFmpegPCMAudio(stream_url, **ffmpeg_opts)
             buffered_source = BufferedAudioSource(source, prefetch_frames=50, max_frames=500)
             audio_source = discord.PCMVolumeTransformer(buffered_source, volume=state.volume)
@@ -275,27 +388,15 @@ async def play_next(bot: Any, guild: discord.Guild):
                 else:
                     vc.play(audio_source, after=after_callback)
 
-            if state.text_channel:
-                if state.current_view:
-                    try:
-                        state.current_view.stop()
-                    except Exception:
-                        pass
-                state.cancel_progress_task()
-                embed = build_nowplaying_embed(bot, next_song, state)
-                view = MusicControllerView(bot, state)
-                state.current_view = view
-                try:
-                    msg = await state.text_channel.send(embed=embed, view=view)
-                    state.nowplaying_message = msg
-                    state.progress_task = bot.loop.create_task(_progress_updater(bot, guild, state, next_song, msg))
-                except Exception:
-                    pass
+            state.start_time = time.time() - seek_offset
+            seek_offset = 0
+            await _send_clean_nowplaying(bot, guild, state, next_song)
             break
 
         except Exception as e:
             logger.error(f"[{bot.node_name} Play Error] 播放失敗: {e}")
             state.is_seeking = False
+            seek_offset = 0
             try:
                 if 'buffered_source' in locals() and buffered_source:
                     buffered_source.cleanup()
@@ -310,6 +411,7 @@ async def play_next(bot: Any, guild: discord.Guild):
                 state.is_playing = False
                 state.current = None
                 state.cancel_progress_task()
+                state.cancel_preload_task()
                 if state.text_channel:
                     try:
                         await state.text_channel.send(t('stream_consecutive_failed', guild_id=guild.id))
@@ -318,5 +420,3 @@ async def play_next(bot: Any, guild: discord.Guild):
                 return
             await asyncio.sleep(0.5)
             continue
-
-

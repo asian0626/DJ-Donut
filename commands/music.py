@@ -14,7 +14,11 @@ from config import (
     HAS_WAVELINK,
     wavelink,
     get_thread_ytdl,
-    get_http_session
+    get_http_session,
+    get_user_favorites,
+    add_user_favorite,
+    remove_user_favorite,
+    clear_user_favorites
 )
 from i18n import t, resolve_locale
 from core.models import (
@@ -47,6 +51,7 @@ from ui.embeds import (
 )
 from ui.views import (
     MusicControllerView,
+    QueuePaginationView,
     SearchSelectView
 )
 
@@ -592,6 +597,7 @@ def register_music_commands(tree: app_commands.CommandTree):
         bot_guild = get_bot_guild(b, interaction.guild_id, interaction.guild) or interaction.guild
         vc = (bot_guild.voice_client if bot_guild else None) or discord.utils.get(getattr(b, 'voice_clients', []), guild__id=interaction.guild_id)
         if vc and is_vc_active(vc):
+            state.skip_requested = True
             if state.loop_mode == 'single':
                 state.loop_mode = 'off'
             await safe_stop(vc)
@@ -614,10 +620,8 @@ def register_music_commands(tree: app_commands.CommandTree):
                     b_vc = bg.voice_client or discord.utils.get(getattr(b, 'voice_clients', []), guild__id=guild_id)
                     if b_vc and is_vc_connected(b_vc):
                         b_state = b.get_state(guild_id)
-                        b_state.loop_mode = 'off'
-                        b_state.current = None
-                        b_state.queue.clear()
-                        b_state.is_playing = False
+                        b_state.skip_requested = True
+                        b_state.cleanup()
                         await safe_stop(b_vc)
                         await safe_disconnect(b_vc)
                         stopped_names.append(b.node_name)
@@ -642,10 +646,8 @@ def register_music_commands(tree: app_commands.CommandTree):
             await interaction.response.send_message(f"❌ 該指令目前僅限擁有 DJ 身分組 <@&{state.dj_role_id}> 或管理員使用！", ephemeral=True)
             return
 
-        state.loop_mode = 'off'
-        state.current = None
-        state.queue.clear()
-        state.is_playing = False
+        state.skip_requested = True
+        state.cleanup()
         bot_guild = get_bot_guild(b, interaction.guild_id, interaction.guild) or interaction.guild
         vc = (bot_guild.voice_client if bot_guild else None) or discord.utils.get(getattr(b, 'voice_clients', []), guild__id=interaction.guild_id)
         if vc:
@@ -676,11 +678,21 @@ def register_music_commands(tree: app_commands.CommandTree):
                 state.current_view.stop()
             except Exception:
                 pass
+        old_msg = state.nowplaying_message
+        if old_msg:
+            try:
+                await old_msg.delete()
+            except Exception:
+                pass
         view = MusicControllerView(b, state)
         state.current_view = view
         await interaction.response.send_message(embed=embed, view=view)
+        try:
+            state.nowplaying_message = await interaction.original_response()
+        except Exception:
+            pass
 
-    @tree.command(name="queue", description="查看你所在語音房的待播歌單")
+    @tree.command(name="queue", description="查看你所在語音房的待播歌單 (支援互動翻頁)")
     async def slash_queue(interaction: discord.Interaction):
         voice_channel = await get_user_voice_channel(interaction)
         if not voice_channel:
@@ -693,8 +705,10 @@ def register_music_commands(tree: app_commands.CommandTree):
             return
 
         state = b.get_state(interaction.guild_id)
-        embed = build_queue_embed(b, state, lang=resolve_locale(interaction))
-        await interaction.response.send_message(embed=embed)
+        lang = resolve_locale(interaction)
+        embed = build_queue_embed(b, state, lang=lang, page=1)
+        view = QueuePaginationView(b, state, lang=lang)
+        await interaction.response.send_message(embed=embed, view=view)
 
     @tree.command(name="move", description="調整待播清單中指定歌曲的播放順序 (Move song position in queue)")
     @app_commands.describe(來源序號="要移動的歌曲在待播清單中的序號", 目標序號="要移至的新序號位置")
@@ -796,3 +810,148 @@ def register_music_commands(tree: app_commands.CommandTree):
 
         if not is_vc_active(vc):
             await play_next(selected_bot, bot_guild)
+
+    @tree.command(name="favorite", description="管理與一鍵播放您的個人最愛收藏歌單 (Personal favorites playlist)")
+    @app_commands.describe(
+        動作="選擇要執行的操作 (播放全部 / 查看清單 / 收藏當前歌曲 / 移除指定序號 / 清空全部)",
+        編號="移除收藏時的歌曲編號 (僅在選擇「移除指定歌曲」時需要填寫)"
+    )
+    @app_commands.choices(動作=[
+        app_commands.Choice(name="▶️ 一鍵播放全部收藏 (Play All Favorites)", value="play"),
+        app_commands.Choice(name="📜 查看個人收藏清單 (View List)", value="list"),
+        app_commands.Choice(name="❤️ 收藏當前播放歌曲 (Add Current Song)", value="add"),
+        app_commands.Choice(name="🗑️ 移除指定編號歌曲 (Remove by Index)", value="remove"),
+        app_commands.Choice(name="🧹 清空個人收藏清單 (Clear All)", value="clear")
+    ])
+    async def slash_favorite(interaction: discord.Interaction, 動作: app_commands.Choice[str], 編號: Optional[int] = None):
+        act = 動作.value
+        uid = interaction.user.id
+
+        if act == "list":
+            favs = get_user_favorites(uid)
+            if not favs:
+                await interaction.response.send_message(
+                    "⭐ 您的個人收藏清單目前是空的！\n播放音樂時可點擊控制面板上的 `❤️ 收藏` 按鈕或使用 `/favorite 動作: 收藏當前播放歌曲` 將喜愛歌曲加入！",
+                    ephemeral=True
+                )
+                return
+            embed = discord.Embed(
+                title=f"❤️ {interaction.user.display_name} 的個人最愛收藏歌單 (共 {len(favs)} 首)",
+                color=0xFF6B81
+            )
+            lines = []
+            for idx, item in enumerate(favs[:25], start=1):
+                dur_str = format_duration(item.get("duration", 0))
+                t_str = item.get("title", "未知歌曲")[:45]
+                u_str = item.get("url", "")
+                if u_str and u_str.startswith("http"):
+                    lines.append(f"`{idx:02d}.` **[{t_str}]({u_str})** `[{dur_str}]`")
+                else:
+                    lines.append(f"`{idx:02d}.` **{t_str}** `[{dur_str}]`")
+            if len(favs) > 25:
+                lines.append(f"\n*...以及其他 **{len(favs) - 25}** 首收藏歌曲*")
+            embed.description = "\n".join(lines)
+            embed.set_footer(text="💡 使用 /favorite 動作: 一鍵播放全部收藏 即可整批加入隊列播放！")
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+            return
+
+        if act == "add":
+            voice_channel = await get_user_voice_channel(interaction)
+            if not voice_channel:
+                await interaction.response.send_message(t('must_join_voice', interaction), ephemeral=True)
+                return
+            b = get_bot_in_user_room(interaction.guild_id, voice_channel, interaction.guild)
+            if not b:
+                await interaction.response.send_message(t('no_bot_in_room', interaction), ephemeral=True)
+                return
+            state = b.get_state(interaction.guild_id)
+            if not state.current:
+                await interaction.response.send_message(t('not_playing', interaction), ephemeral=True)
+                return
+            cur = state.current
+            song_item = {
+                "title": cur.title,
+                "url": cur.url or f"ytsearch5:{cur.title}",
+                "duration": cur.duration or 0,
+                "thumbnail": cur.thumbnail or "",
+                "uploader": cur.uploader or ""
+            }
+            added, total_count = add_user_favorite(uid, song_item)
+            if added:
+                await interaction.response.send_message(f"❤️ 已成功將 **{cur.title}** 加入您的個人最愛收藏！（目前共 `{total_count}` 首）", ephemeral=True)
+            else:
+                await interaction.response.send_message(f"💡 **{cur.title}** 已經在您的個人最愛收藏中囉！（共 `{total_count}` 首）", ephemeral=True)
+            return
+
+        if act == "remove":
+            favs = get_user_favorites(uid)
+            if not favs:
+                await interaction.response.send_message("❌ 您的個人收藏清單目前為空！", ephemeral=True)
+                return
+            if not 編號 or 編號 < 1 or 編號 > len(favs):
+                await interaction.response.send_message(f"❌ 請輸入有效的收藏歌曲編號 (`1 ~ {len(favs)}`)！", ephemeral=True)
+                return
+            removed = remove_user_favorite(uid, 編號)
+            if removed:
+                await interaction.response.send_message(f"🗑️ 已從個人收藏中移除第 `{編號}` 首歌曲：**{removed.get('title', '未知')}**！", ephemeral=True)
+            else:
+                await interaction.response.send_message("❌ 移除失敗，請確認編號是否正確！", ephemeral=True)
+            return
+
+        if act == "clear":
+            count = clear_user_favorites(uid)
+            if count == 0:
+                await interaction.response.send_message("❌ 您的個人收藏清單已經是空的！", ephemeral=True)
+            else:
+                await interaction.response.send_message(f"🧹 已成功清空您的個人最愛收藏（共清除 `{count}` 首歌曲）！", ephemeral=True)
+            return
+
+        if act == "play":
+            favs = get_user_favorites(uid)
+            if not favs:
+                await interaction.response.send_message("⭐ 您的個人收藏清單目前是空的！先按控制面板上的 `❤️ 收藏` 將喜歡的歌曲存起來吧！", ephemeral=True)
+                return
+            voice_channel = await get_user_voice_channel(interaction)
+            if not voice_channel:
+                await interaction.response.send_message(t('must_join_voice', interaction), ephemeral=True)
+                return
+            await interaction.response.defer()
+            selected_bot, is_new_join = await find_best_bot_for_channel(interaction.guild_id, voice_channel, interaction.guild)
+            if not selected_bot:
+                await interaction.followup.send(t('no_bot_available', interaction))
+                return
+            bot_guild = get_bot_guild(selected_bot, interaction.guild_id, interaction.guild) or interaction.guild
+            vc = (bot_guild.voice_client if bot_guild else None) or discord.utils.get(getattr(selected_bot, 'voice_clients', []), guild__id=interaction.guild_id)
+            if is_new_join or not vc or not is_vc_connected(vc):
+                try:
+                    vc = await safe_voice_connect(selected_bot, voice_channel, timeout=25.0)
+                except Exception as e:
+                    await interaction.followup.send(t('connect_failed', interaction, bot_name=selected_bot.node_name, error=str(e)))
+                    return
+            state = selected_bot.get_state(interaction.guild_id)
+            state.text_channel = interaction.channel
+            added_count = 0
+            for item in favs:
+                if not isinstance(item, dict) or not item.get("title"):
+                    continue
+                s = Song({
+                    "title": item.get("title"),
+                    "webpage_url": item.get("url"),
+                    "url": item.get("url") or f"ytsearch5:{item.get('title')}",
+                    "duration": item.get("duration", 0),
+                    "thumbnail": item.get("thumbnail", ""),
+                    "uploader": item.get("uploader", "個人收藏")
+                }, interaction.user)
+                state.queue.append(s)
+                added_count += 1
+            embed = discord.Embed(
+                title=f"❤️ 【{selected_bot.node_name}】已匯入個人最愛收藏歌單！",
+                description=f"已將 **{interaction.user.display_name}** 的 **`{added_count}`** 首收藏曲目排入待播清單！",
+                color=0xFF6B81
+            )
+            embed.add_field(name="📍 當前隊列總數", value=f"`{len(state.queue)}` 首", inline=True)
+            embed.add_field(name="🤖 服務節點", value=f"`{selected_bot.node_name}`", inline=True)
+            embed.add_field(name="👤 點播者", value=interaction.user.mention, inline=True)
+            await interaction.followup.send(embed=embed)
+            if not is_vc_active(vc):
+                await play_next(selected_bot, bot_guild)

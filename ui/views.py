@@ -1,8 +1,17 @@
 import discord
 import asyncio
+import random
 import time
+from collections import deque
 from typing import Optional, List, Any
-from config import save_guild_setting, MEDIA_EXECUTOR, format_duration, logger
+from config import (
+    save_guild_setting,
+    get_user_favorites,
+    add_user_favorite,
+    MEDIA_EXECUTOR,
+    format_duration,
+    logger
+)
 from core.models import (
     Song,
     GuildMusicState,
@@ -12,11 +21,75 @@ from core.models import (
     has_dj_permission,
     is_vc_active,
     is_vc_connected,
-    safe_voice_connect
+    safe_voice_connect,
+    get_playback_elapsed
 )
 from ui.embeds import build_nowplaying_embed, build_queue_embed
 from i18n import t, resolve_locale
-from lyrics import get_lyrics
+from lyrics import get_lyrics_async, format_clean_lyrics
+
+
+class QueuePaginationView(discord.ui.View):
+    def __init__(self, bot: 'MusicNodeBot', state: GuildMusicState, lang: str = 'zh-TW', per_page: int = 10):
+        super().__init__(timeout=180)
+        self.bot = bot
+        self.state = state
+        self.lang = lang
+        self.per_page = per_page
+        self.page = 1
+        self._sync_buttons()
+
+    def _total_pages(self) -> int:
+        return max(1, (len(self.state.queue) + self.per_page - 1) // self.per_page)
+
+    def _sync_buttons(self):
+        tp = self._total_pages()
+        self.page = max(1, min(self.page, tp))
+        for child in self.children:
+            if isinstance(child, discord.ui.Button):
+                if child.custom_id in ("q_first", "q_prev"):
+                    child.disabled = (self.page <= 1)
+                elif child.custom_id in ("q_next", "q_last"):
+                    child.disabled = (self.page >= tp)
+                elif child.custom_id == "q_shuffle":
+                    child.disabled = (len(self.state.queue) < 2)
+
+    async def _refresh(self, interaction: discord.Interaction):
+        self._sync_buttons()
+        embed = build_queue_embed(self.bot, self.state, lang=self.lang, page=self.page, per_page=self.per_page)
+        await interaction.response.edit_message(embed=embed, view=self)
+
+    @discord.ui.button(emoji="⏮️", style=discord.ButtonStyle.secondary, custom_id="q_first")
+    async def first_page(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.page = 1
+        await self._refresh(interaction)
+
+    @discord.ui.button(emoji="⬅️", style=discord.ButtonStyle.primary, custom_id="q_prev")
+    async def prev_page(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.page = max(1, self.page - 1)
+        await self._refresh(interaction)
+
+    @discord.ui.button(emoji="➡️", style=discord.ButtonStyle.primary, custom_id="q_next")
+    async def next_page(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.page = min(self._total_pages(), self.page + 1)
+        await self._refresh(interaction)
+
+    @discord.ui.button(emoji="⏭️", style=discord.ButtonStyle.secondary, custom_id="q_last")
+    async def last_page(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.page = self._total_pages()
+        await self._refresh(interaction)
+
+    @discord.ui.button(label="隨機打亂", emoji="🔀", style=discord.ButtonStyle.success, custom_id="q_shuffle")
+    async def shuffle_queue(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not has_dj_permission(interaction, self.state):
+            await interaction.response.send_message(t('dj_permission_denied', interaction, role_id=self.state.dj_role_id), ephemeral=True)
+            return
+        if len(self.state.queue) >= 2:
+            q_list = list(self.state.queue)
+            random.shuffle(q_list)
+            self.state.queue = deque(q_list)
+        await self._refresh(interaction)
+
 
 class MusicControllerView(discord.ui.View):
     def __init__(self, bot: 'MusicNodeBot', state: GuildMusicState):
@@ -63,6 +136,7 @@ class MusicControllerView(discord.ui.View):
             await interaction.response.send_message(t('not_playing', interaction), ephemeral=True)
             return
         self.state.last_active = time.time()
+        self.state.skip_requested = True
         self.state.queue.appendleft(self.state.current)
         await safe_stop(vc)
         await interaction.response.send_message("⏮️ 重播當前歌曲！", ephemeral=True)
@@ -77,11 +151,11 @@ class MusicControllerView(discord.ui.View):
         self.state.last_active = time.time()
         if not is_vc_connected(vc):
             user_voice = interaction.user.voice.channel if (interaction.user and interaction.user.voice) else None
-            target_ch = user_voice or getattr(vc, 'channel', None)
+            target_ch = user_voice or getattr(vc, 'channel', None) or self.state.voice_channel
             if target_ch:
                 vc = await safe_voice_connect(self.bot, target_ch, timeout=30.0)
         await interaction.response.defer()
-        res = await safe_pause_resume(vc, self.state, bot=self.bot, guild=bot_guild)
+        await safe_pause_resume(vc, self.state, bot=self.bot, guild=bot_guild)
         self._update_button_states()
         embed = build_nowplaying_embed(self.bot, self.state.current, self.state, lang=resolve_locale(interaction))
         try:
@@ -99,6 +173,7 @@ class MusicControllerView(discord.ui.View):
             await interaction.response.send_message(t('not_playing', interaction), ephemeral=True)
             return
         self.state.last_active = time.time()
+        self.state.skip_requested = True
         if self.state.loop_mode == 'single':
             self.state.loop_mode = 'off'
         self.state.cancel_progress_task()
@@ -122,6 +197,7 @@ class MusicControllerView(discord.ui.View):
             return
         vc = self._get_vc(interaction)
         self.state.last_active = time.time()
+        self.state.skip_requested = True
         self.state.cleanup()
         await safe_stop(vc)
         await safe_disconnect(vc)
@@ -172,27 +248,96 @@ class MusicControllerView(discord.ui.View):
         await interaction.response.defer(ephemeral=True)
         target_title = self.state.current.title
         target_artist = self.state.current.uploader or ""
-        loop = asyncio.get_event_loop()
-        res = await loop.run_in_executor(MEDIA_EXECUTOR, lambda: get_lyrics(target_title, target_artist))
+        res = self.state.current_lyrics or await get_lyrics_async(target_title, target_artist)
         if not res:
             await interaction.followup.send(t('lyrics_not_found', interaction, title=target_title), ephemeral=True)
             return
+        self.state.current_lyrics = res
         display_title, lrc_text, is_synced = res
-        if len(lrc_text) > 4000:
-            lrc_text = lrc_text[:3990] + "\n..."
+        elapsed = get_playback_elapsed(self.state)
+        clean_body = format_clean_lyrics(lrc_text, is_synced, elapsed_sec=elapsed)
+        if len(clean_body) > 4000:
+            clean_body = clean_body[:3990] + "\n..."
         embed = discord.Embed(
-            title=f"💬 【{display_title}】即時歌詞",
-            description=lrc_text,
+            title=f"💬 【{display_title}】即時動態歌詞",
+            description=clean_body,
             color=0x1DB954 if is_synced else 0x5865F2
         )
-        sync_str = "⚡ 動態時間軸 (Synced)" if is_synced else "📝 純文字 (Plain)"
+        sync_str = "⚡ 動態時間軸高亮 (Synced Karaoke)" if is_synced else "📝 純文字 (Plain)"
         embed.set_footer(text=f"模式: {sync_str} • 資料庫: LRCLIB / Netease")
         await interaction.followup.send(embed=embed, ephemeral=True)
 
     @discord.ui.button(label="隊列", emoji="📜", style=discord.ButtonStyle.secondary, row=1, custom_id="music_queue")
     async def view_queue(self, interaction: discord.Interaction, button: discord.ui.Button):
-        embed = build_queue_embed(self.bot, self.state, lang=resolve_locale(interaction))
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        lang = resolve_locale(interaction)
+        embed = build_queue_embed(self.bot, self.state, lang=lang, page=1)
+        view = QueuePaginationView(self.bot, self.state, lang=lang)
+        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+
+    @discord.ui.button(label="收藏", emoji="❤️", style=discord.ButtonStyle.secondary, row=2, custom_id="music_fav_add")
+    async def fav_add(self, interaction: discord.Interaction, button: discord.ui.Button):
+        cur = self.state.current
+        if not cur:
+            await interaction.response.send_message(t('not_playing', interaction), ephemeral=True)
+            return
+        song_item = {
+            "title": cur.title,
+            "url": cur.url or f"ytsearch5:{cur.title}",
+            "duration": cur.duration or 0,
+            "thumbnail": cur.thumbnail or "",
+            "uploader": cur.uploader or ""
+        }
+        added, total_count = add_user_favorite(interaction.user.id, song_item)
+        if added:
+            await interaction.response.send_message(
+                f"❤️ 已將 **{cur.title}** 加入您的個人最愛收藏！（目前共 `{total_count}` 首，隨時可按 `⭐ 播收藏` 或 `/favorite play` 點播）",
+                ephemeral=True
+            )
+        else:
+            await interaction.response.send_message(
+                f"💡 **{cur.title}** 已經在您的個人最愛收藏清單中囉！（共 `{total_count}` 首）",
+                ephemeral=True
+            )
+
+    @discord.ui.button(label="播收藏", emoji="⭐", style=discord.ButtonStyle.secondary, row=2, custom_id="music_fav_play")
+    async def fav_play(self, interaction: discord.Interaction, button: discord.ui.Button):
+        favs = get_user_favorites(interaction.user.id)
+        if not favs:
+            await interaction.response.send_message("⭐ 您的個人收藏清單目前是空的！先按旁邊的 `❤️ 收藏` 將喜歡的歌曲存起來吧！", ephemeral=True)
+            return
+        added_count = 0
+        for item in favs:
+            if not isinstance(item, dict) or not item.get("title"):
+                continue
+            s = Song({
+                "title": item.get("title"),
+                "webpage_url": item.get("url"),
+                "url": item.get("url") or f"ytsearch5:{item.get('title')}",
+                "duration": item.get("duration", 0),
+                "thumbnail": item.get("thumbnail", ""),
+                "uploader": item.get("uploader", "個人收藏")
+            }, interaction.user)
+            self.state.queue.append(s)
+            added_count += 1
+        self.state.last_active = time.time()
+        embed = build_nowplaying_embed(self.bot, self.state.current, self.state, lang=resolve_locale(interaction))
+        await interaction.response.edit_message(embed=embed, view=self)
+        await interaction.followup.send(f"⭐ 已成功將您收藏的 **`{added_count}`** 首最愛歌曲排入當前待播隊列！", ephemeral=True)
+
+    @discord.ui.button(label="打亂", emoji="🔀", style=discord.ButtonStyle.secondary, row=2, custom_id="music_shuffle")
+    async def shuffle_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not has_dj_permission(interaction, self.state):
+            await interaction.response.send_message(t('dj_permission_denied', interaction, role_id=self.state.dj_role_id), ephemeral=True)
+            return
+        if len(self.state.queue) < 2:
+            await interaction.response.send_message(t('queue_empty', interaction), ephemeral=True)
+            return
+        q_list = list(self.state.queue)
+        random.shuffle(q_list)
+        self.state.queue = deque(q_list)
+        self.state.last_active = time.time()
+        await interaction.response.send_message(t('shuffle_success', interaction, count=len(self.state.queue)), ephemeral=True)
+
 
 class SearchSelectView(discord.ui.View):
     def __init__(self, bot: 'MusicNodeBot', guild: discord.Guild, user: discord.Member, results: list):
@@ -278,4 +423,3 @@ class SearchSelectView(discord.ui.View):
         for item in self.children:
             item.disabled = True
         self.stop()
-

@@ -125,17 +125,27 @@ class MusicNodeBot(commands.Bot):
 
     async def on_voice_state_update(self, member: discord.Member, before: discord.VoiceState, after: discord.VoiceState):
         guild = member.guild
+        if member.id == self.user.id and after.channel is not None:
+            self.get_state(guild.id).voice_channel = after.channel
+
         if member.id == self.user.id and after.channel is None:
             state = self.get_state(guild.id)
             prev_channel = before.channel
+            was_unexpected = (state.voice_channel is not None or state.is_playing) and not state.skip_requested
+            old_np_msg = state.nowplaying_message
             state.cleanup()
+            if old_np_msg:
+                try:
+                    await old_np_msg.delete()
+                except Exception:
+                    pass
             bg = self.get_guild(guild.id) or guild
             vc = (bg.voice_client if bg else None) or discord.utils.get(getattr(self, 'voice_clients', []), guild__id=guild.id)
             if vc:
                 from core.models import safe_stop, safe_disconnect
                 await safe_stop(vc)
                 await safe_disconnect(vc)
-            if state.text_channel and prev_channel:
+            if was_unexpected and state.text_channel and prev_channel:
                 try:
                     from i18n import t
                     embed = discord.Embed(

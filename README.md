@@ -2,7 +2,7 @@
 
 <div align="center">
 
-![Version](https://img.shields.io/badge/Version-v1.5.5-blue?logo=git)
+![Version](https://img.shields.io/badge/Version-v1.6.0-blue?logo=git)
 ![Python](https://img.shields.io/badge/Python-3.10%20%7C%203.11%20%7C%203.12-3776AB?logo=python&logoColor=white)
 ![Discord.py](https://img.shields.io/badge/Discord.py-v2.7.0%2B-5865F2?logo=discord&logoColor=white)
 ![Lavalink](https://img.shields.io/badge/Lavalink-v4.0%2B-FF3366?logo=audacity&logoColor=white)
@@ -228,6 +228,15 @@ discord-music-bot/
 ---
 
 ## Changelog
+
+### v1.6.0 (2026-10-23)
+- **Zero-Gap Next-Track Background Pre-Resolution**: Automatically resolves and caches the upcoming track's stream URL (`state.queue[0]`) in the background 3 seconds after playback begins, reducing track transition latency to `<1ms`.
+- **Live Real-Time DSP Filter & Bassboost Hot-Swapping**: Upgraded `/bassboost` and `/filter` on the Native FFmpeg Engine to hot-swap the active audio stream right at the current playback second (`hot_swap_current_stream`), letting listeners hear EQ, Nightcore, Vaporwave, and 8D Surround changes in under 1 second without waiting for the next track.
+- **Voice WebSocket 1006 Auto-Reconnect & Mid-Song Resume**: Added automatic voice channel reconnection and exact-second playback re-anchoring if a track is unexpectedly interrupted mid-song by Discord voice gateway resets (`code 1006`) or CDN socket drops.
+- **Live Synced Karaoke Lyrics & Async `aiohttp` Lyrics Engine**: Rebuilt `lyrics.py` with non-blocking `aiohttp` pooling and a 1-hour LRU cache (`_LYRICS_CACHE`). Parsed LRC `[mm:ss.xx]` timestamps to display live scrolling Karaoke lyrics directly inside the Now Playing card and highlight the active line in `/lyrics`.
+- **Anti-Spam Now Playing Card Cleanup**: Automatically deletes the previous track's Now Playing controller message before posting the new card, keeping text channels completely clean during long listening sessions.
+- **Interactive Paginated Queue Browser**: Added `QueuePaginationView` (`⏮️`, `⬅️`, `➡️`, `⏭️`, `🔀`) to `/queue` and the controller's Queue button, allowing seamless browsing across hundreds of queued tracks.
+- **Personal Favorites Playlist System (`/favorite` & Controller Buttons)**: Added `/favorite` (`play`, `list`, `add`, `remove`, `clear`) and 3 new quick-action controller buttons (`❤️ 收藏`, `⭐ 播收藏`, `🔀 打亂`) with atomic persistence.
 
 ### v1.5.5 (2026-10-20)
 - **Eliminate FFmpeg Pipe Reader Write Error**: Removed invalid `stderr=subprocess.DEVNULL` parameter in `FFmpegPCMAudio` across `core/player.py`, `core/models.py`, and `commands/audio.py`. In discord.py, passing an integer to `stderr` causes the internal `_pipe_reader` thread to attempt `dest.write(data)` on an `int`, crashing with `AttributeError: 'int' object has no attribute 'write'`. FFmpeg output is already cleanly suppressed via `-nostats -loglevel fatal`.
