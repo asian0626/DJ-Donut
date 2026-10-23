@@ -56,32 +56,35 @@ You can invite the pre-hosted **DJ Donut** cluster directly to your server:
 
 ## Slash Commands
 
-| Command | Arguments | Description | 說明 (繁體中文) |
-| :--- | :--- | :--- | :--- |
-| **/help** | *None* | Interactive manual categorized by features | 查看現代化分類指令使用指南 |
-| **/play** | `query`, `[bot_id]` | Play a track or playlist (auto-dispatches an idle bot or targeted bot 1~5) | 點歌（支援智慧歷史補全與自動分配） |
-| **/search** | `query` | Search tracks and pick from interactive top-5 select menu | 搜尋歌曲並從前 5 首下拉選單中挑選播放 |
-| **/seek** | `time` | Fast-forward or jump to a timestamp (e.g. `90` or `01:30`) | 精確跳轉當前歌曲播放進度 (支援秒數或分:秒) |
-| **/move** | `from`, `to` | Move a queued track to a new position | 調整待播清單中指定歌曲的播放順序 |
-| **/replay** | `[index]` | Replay a track from playback history | 一鍵重播歷史紀錄中的歌曲 (預設上一首) |
-| **/shuffle** | *None* | Randomly shuffle all upcoming songs in the queue | 隨機打亂當前語音房的待播歌單順序 |
-| **/remove** | `index` | Remove a specific track from the queue by its number | 移除待播清單中的指定序號歌曲 |
-| **/clear** | *None* | Clear all upcoming songs from the queue | 一鍵清空當前語音房所有的待播歌曲 |
-| **/history** | *None* | View the last 15 songs played in this room | 檢視最近播放過的歷史歌曲紀錄 |
-| **/nowplaying**| *None* | Show track details, progress bar, and interactive buttons | 查看目前歌曲、即時進度條與控制器 |
-| **/queue** | *None* | Show the upcoming track queue for your room | 查看你所在語音房的待播歌單隊列 |
-| **/skip** | *None* | Skip the track currently playing in your room (DJ guarded) | 跳過你當前語音房的歌曲 (支援 DJ 權限) |
-| **/stop** | `[force_all]` | Stop playback and disconnect the bot (or stop all bots) | 停止播放並退出語音房（或強制全部退出） |
-| **/dj** | `[role]`, `[clear]` | Manage or view server DJ permission role | 設定、檢視或清除本伺服器 DJ 管理身分組 |
-| **/autoplay** | *None* | Toggle smart autoplay radio mode when queue ends | 切換自動接歌模式 (歌單結束自動接續播放) |
-| **/lyrics** | `[song]` | Look up synced or plain lyrics for current or queried track | 查詢當前或指定歌曲的動態/純文字歌詞 |
-| **/bassboost** | `level` | Adjust bass boost (+4dB to +20dB) | 調整重低音增強強度 |
-| **/filter** | `preset` | Apply audio filters (Rock, Pop, Vocal, Nightcore, 8D, etc.) | 套用等化器音效濾鏡 (搖滾/夜核/8D等) |
-| **/bitrate** | `[kbps]` | Maximize the voice channel bitrate up to 384kbps | 查看或調整目前語音房的位元率 |
-| **/status** | *None* | Live cluster dashboard for all 5 bot nodes | 查看各機器人的連線狀態、所在房間與負載 |
-| **/247** | *None* | Toggle 24/7 permanent room presence | 切換 24/7 永久常駐語音房模式 |
-| **/language** | `language` | Set server default language (en / zh-TW / zh-CN / ja / ko / es) | 設定伺服器預設語言 |
-| **/engine** | *None* | View real-time audio pipeline and engine diagnostics | 查看雙引擎架構即時運作狀態與音訊規格 |
+| Command | Arguments | Description |
+| :--- | :--- | :--- |
+| **/help** | *None* | Interactive manual categorized by features |
+| **/play** | `query`, `[bot_id]` | Play a track or playlist (auto-dispatches an idle bot or targeted bot 1–5) |
+| **/search** | `query` | Search tracks and pick from an interactive top-5 select menu |
+| **/pause** | *None* | Pause the currently playing track in your voice room |
+| **/resume** | *None* | Resume paused playback with automatic stream re-anchoring |
+| **/seek** | `time` | Fast-forward or jump to a timestamp (e.g. `90` or `01:30`) |
+| **/move** | `from`, `to` | Move a queued track to a new position |
+| **/replay** | `[index]` | Replay a track from playback history |
+| **/shuffle** | *None* | Randomly shuffle all upcoming songs in the queue |
+| **/remove** | `index` | Remove a specific track from the queue by its number |
+| **/clear** | *None* | Clear all upcoming songs from the queue |
+| **/history** | *None* | View the last 15 songs played in this room |
+| **/favorite** | `action`, `[index]` | Manage personal favorite tracks (`play`, `list`, `add`, `remove`, `clear`) |
+| **/nowplaying**| *None* | Show track details, synced karaoke lyrics, progress bar, and controller |
+| **/queue** | *None* | Browse the upcoming track queue with interactive pagination |
+| **/skip** | *None* | Skip the track currently playing in your room (DJ guarded) |
+| **/stop** | `[force_all]` | Stop playback and disconnect the bot (or stop all bots) |
+| **/dj** | `[role]`, `[clear]` | Manage or view server DJ permission role |
+| **/autoplay** | *None* | Toggle smart autoplay radio mode when queue ends |
+| **/lyrics** | `[song]` | Look up synced or plain lyrics for current or queried track |
+| **/bassboost** | `level` | Live-adjust bass boost (`+4dB` to `+20dB`) with instant stream hot-swap |
+| **/filter** | `preset` | Live-apply audio filters (Rock, Pop, Vocal, Nightcore, 8D, etc.) |
+| **/bitrate** | `[kbps]` | Maximize the voice channel bitrate up to 384kbps |
+| **/status** | *None* | Live cluster dashboard for all 5 bot nodes |
+| **/247** | *None* | Toggle 24/7 permanent room presence |
+| **/language** | `language` | Set server default language (`en` / `zh-TW` / `zh-CN` / `ja` / `ko` / `es`) |
+| **/engine** | *None* | View real-time audio pipeline and engine diagnostics |
 
 ---
 
@@ -236,7 +239,7 @@ discord-music-bot/
 - **Live Synced Karaoke Lyrics & Async `aiohttp` Lyrics Engine**: Rebuilt `lyrics.py` with non-blocking `aiohttp` pooling and a 1-hour LRU cache (`_LYRICS_CACHE`). Parsed LRC `[mm:ss.xx]` timestamps to display live scrolling Karaoke lyrics directly inside the Now Playing card and highlight the active line in `/lyrics`.
 - **Anti-Spam Now Playing Card Cleanup**: Automatically deletes the previous track's Now Playing controller message before posting the new card, keeping text channels completely clean during long listening sessions.
 - **Interactive Paginated Queue Browser**: Added `QueuePaginationView` (`⏮️`, `⬅️`, `➡️`, `⏭️`, `🔀`) to `/queue` and the controller's Queue button, allowing seamless browsing across hundreds of queued tracks.
-- **Personal Favorites Playlist System (`/favorite` & Controller Buttons)**: Added `/favorite` (`play`, `list`, `add`, `remove`, `clear`) and 3 new quick-action controller buttons (`❤️ 收藏`, `⭐ 播收藏`, `🔀 打亂`) with atomic persistence.
+- **Personal Favorites Playlist System (`/favorite` & Controller Buttons)**: Added `/favorite` (`play`, `list`, `add`, `remove`, `clear`) and 3 new quick-action controller buttons (`❤️ Favorite`, `⭐ Play Favorites`, `🔀 Shuffle`) with atomic persistence.
 
 ### v1.5.5 (2026-10-20)
 - **Eliminate FFmpeg Pipe Reader Write Error**: Removed invalid `stderr=subprocess.DEVNULL` parameter in `FFmpegPCMAudio` across `core/player.py`, `core/models.py`, and `commands/audio.py`. In discord.py, passing an integer to `stderr` causes the internal `_pipe_reader` thread to attempt `dest.write(data)` on an `int`, crashing with `AttributeError: 'int' object has no attribute 'write'`. FFmpeg output is already cleanly suppressed via `-nostats -loglevel fatal`.
@@ -259,6 +262,19 @@ discord-music-bot/
 - **Cute Departure Notification**: Sent a sweet pastel-pink embed with kaomoji (`(｡•́︿•̀｡)` & `(๑•́ ₃ •̀๑)`) to the room's text channel if the bot is kicked or disconnected by an administrator, notifying users that the bot can be summoned back immediately with `/play`.
 - **Extended Pause Recovery & Re-Anchoring**: Fixed audio freezing and playback failure after extended pause periods by flushing stale cached stream URLs, fetching fresh YouTube CDN streams, and safely awaiting `AudioPlayer` termination before re-anchoring playback with FFmpeg.
 - **Auto Voice Reconnect on Resume**: Added automatic voice channel reconnection if the voice socket dropped or timed out during a prolonged pause, ensuring seamless resumption right from where playback stopped.
+
+### v1.5.2 (2026-10-17)
+- **Infinite Controller Lifespan**: Updated `MusicControllerView` to `timeout=None` and removed automatic button disabling so the interactive Now Playing panel remains permanently responsive regardless of pause duration.
+- **Smart Stale TCP Re-Anchoring**: Validated stream URLs on resume after pauses `>= 15s` and re-anchored playback at the exact elapsed second to recover from remote CDN socket timeouts.
+- **Dynamic Play/Pause Toggle**: Updated the interactive controller button to dynamically switch between `▶️` (play/resume) and `⏸️` (pause) based on live playback state.
+- **Added `/pause` and `/resume` Commands**: Added dedicated slash commands with DJ permission enforcement, voice room routing, and multi-bot cluster support.
+
+### v1.5.1 (2026-10-17)
+- **Extractor Client Update**: Configured `yt-dlp` to use mobile player clients (`['android', 'ios']`), bypassing web BotGuard and GVS PO Token restrictions in Docker and cloud environments without cookies.
+- **Enabled HLS Streams**: Removed `skip: ['hls']` to allow FFmpeg to ingest HLS audio streams seamlessly.
+- **Robust URL Resolution**: Validated 11-character YouTube video IDs in `Song.__init__` and playlist parsing before prepending watch URLs.
+- **Smart Multilingual Title Fallback**: Stripped full-width CJK brackets (`【】`, `「」`, `『』`) and promotional noise during fallback searches before falling back to SoundCloud.
+- **Format Filtering**: Excluded storyboard image mosaics (`sb0`–`sb3`) from audio format candidate selection.
 
 ### v1.5.0 (2026-10-16)
 - **Non-Recursive Playback Loop & Exponential Backoff**: Completely rewrote `play_next` to use an iterative loop that eliminates recursion limits during stream resolution failures; added exponential backoff retries (0.5s, 1.2s, 2.5s) on stream extraction to survive transient network spikes.
