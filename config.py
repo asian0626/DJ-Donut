@@ -13,7 +13,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-__version__ = "1.6.0"
+__version__ = "1.6.1"
 
 logging.basicConfig(
     level=logging.INFO,
@@ -68,7 +68,7 @@ COOKIE_FILE = os.path.join(os.path.dirname(__file__), "cookies.txt")
 COOKIES_FILE = COOKIE_FILE
 SETTINGS_FILE = os.path.join(os.path.dirname(__file__), "guild_settings.json")
 GUILD_SETTINGS_FILE = SETTINGS_FILE
-_SETTINGS_LOCK = threading.Lock()
+_SETTINGS_LOCK = threading.RLock()
 
 BASSBOOST_PRESETS = {
     "off": {"label": "關閉 (原音)", "gain": 0.0, "ffmpeg": None},
@@ -236,38 +236,54 @@ async def close_http_session():
 
 _GUILD_SETTINGS_CACHE: Optional[dict] = None
 
-def load_all_guild_settings() -> dict:
+def _load_settings_unlocked() -> dict:
     global _GUILD_SETTINGS_CACHE
+    if _GUILD_SETTINGS_CACHE is not None:
+        return dict(_GUILD_SETTINGS_CACHE)
+    if os.path.exists(SETTINGS_FILE):
+        try:
+            with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
+                _GUILD_SETTINGS_CACHE = json.load(f)
+                return dict(_GUILD_SETTINGS_CACHE)
+        except Exception as e:
+            logger.warning(f"[Settings Load Warning] {e}")
+            return {}
+    _GUILD_SETTINGS_CACHE = {}
+    return {}
+
+def load_all_guild_settings() -> dict:
     with _SETTINGS_LOCK:
-        if _GUILD_SETTINGS_CACHE is not None:
-            return dict(_GUILD_SETTINGS_CACHE)
-        if os.path.exists(SETTINGS_FILE):
+        return _load_settings_unlocked()
+
+def _save_settings_dict(data: dict):
+    global _GUILD_SETTINGS_CACHE
+    _GUILD_SETTINGS_CACHE = data
+    temp_file = SETTINGS_FILE + ".tmp"
+    try:
+        with open(temp_file, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        os.replace(temp_file, SETTINGS_FILE)
+    except OSError:
+        with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        if os.path.exists(temp_file):
             try:
-                with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
-                    _GUILD_SETTINGS_CACHE = json.load(f)
-                    return dict(_GUILD_SETTINGS_CACHE)
-            except Exception as e:
-                logger.warning(f"[Settings Load Warning] {e}")
-                return {}
-        _GUILD_SETTINGS_CACHE = {}
-        return {}
+                os.remove(temp_file)
+            except Exception:
+                pass
 
 def save_guild_setting(guild_id: int, key: str, value: Any):
     global _GUILD_SETTINGS_CACHE
     with _SETTINGS_LOCK:
         try:
             if _GUILD_SETTINGS_CACHE is None:
-                load_all_guild_settings()
+                _load_settings_unlocked()
             data = _GUILD_SETTINGS_CACHE if _GUILD_SETTINGS_CACHE is not None else {}
             gid = str(guild_id)
             if gid not in data:
                 data[gid] = {}
             data[gid][key] = value
-            _GUILD_SETTINGS_CACHE = data
-            temp_file = SETTINGS_FILE + ".tmp"
-            with open(temp_file, "w", encoding="utf-8") as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
-            os.replace(temp_file, SETTINGS_FILE)
+            _save_settings_dict(data)
         except Exception as e:
             logger.error(f"[Settings Save Error] {e}")
 
@@ -276,14 +292,6 @@ load_guild_settings = load_all_guild_settings
 def get_guild_setting(guild_id: int, key: str, default: Any = None) -> Any:
     data = load_all_guild_settings()
     return data.get(str(guild_id), {}).get(key, default)
-
-def _save_settings_dict(data: dict):
-    global _GUILD_SETTINGS_CACHE
-    _GUILD_SETTINGS_CACHE = data
-    temp_file = SETTINGS_FILE + ".tmp"
-    with open(temp_file, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-    os.replace(temp_file, SETTINGS_FILE)
 
 def get_user_favorites(user_id: int) -> List[dict]:
     data = load_all_guild_settings()
@@ -297,7 +305,7 @@ def add_user_favorite(user_id: int, song_item: dict) -> Tuple[bool, int]:
     global _GUILD_SETTINGS_CACHE
     with _SETTINGS_LOCK:
         if _GUILD_SETTINGS_CACHE is None:
-            load_all_guild_settings()
+            _load_settings_unlocked()
         data = _GUILD_SETTINGS_CACHE if _GUILD_SETTINGS_CACHE is not None else {}
         if "_favorites" not in data or not isinstance(data.get("_favorites"), dict):
             data["_favorites"] = {}
@@ -327,7 +335,7 @@ def remove_user_favorite(user_id: int, index: int) -> Optional[dict]:
     global _GUILD_SETTINGS_CACHE
     with _SETTINGS_LOCK:
         if _GUILD_SETTINGS_CACHE is None:
-            load_all_guild_settings()
+            _load_settings_unlocked()
         data = _GUILD_SETTINGS_CACHE if _GUILD_SETTINGS_CACHE is not None else {}
         favs = data.get("_favorites", {})
         uid = str(user_id)
@@ -347,7 +355,7 @@ def clear_user_favorites(user_id: int) -> int:
     global _GUILD_SETTINGS_CACHE
     with _SETTINGS_LOCK:
         if _GUILD_SETTINGS_CACHE is None:
-            load_all_guild_settings()
+            _load_settings_unlocked()
         data = _GUILD_SETTINGS_CACHE if _GUILD_SETTINGS_CACHE is not None else {}
         favs = data.get("_favorites", {})
         uid = str(user_id)

@@ -2,7 +2,7 @@
 
 <div align="center">
 
-![Version](https://img.shields.io/badge/Version-v1.6.0-blue?logo=git)
+![Version](https://img.shields.io/badge/Version-v1.6.1-blue?logo=git)
 ![Python](https://img.shields.io/badge/Python-3.10%20%7C%203.11%20%7C%203.12-3776AB?logo=python&logoColor=white)
 ![Discord.py](https://img.shields.io/badge/Discord.py-v2.7.0%2B-5865F2?logo=discord&logoColor=white)
 ![Lavalink](https://img.shields.io/badge/Lavalink-v4.0%2B-FF3366?logo=audacity&logoColor=white)
@@ -231,6 +231,10 @@ discord-music-bot/
 ---
 
 ## Changelog
+
+### v1.6.1 (2026-10-28)
+- **Eliminate Settings & Volume Deadlock**: Resolved a critical deadlock in `config.py` where calling `save_guild_setting` (e.g. clicking `🔊 +10%` / `🔉 -10%` volume buttons) or favorites functions when `_GUILD_SETTINGS_CACHE` was unset triggered re-entrant lock acquisition on `_SETTINGS_LOCK`. Replaced `threading.Lock` with `threading.RLock` and added `_load_settings_unlocked()`, completely eliminating asyncio loop thread freezes and `heartbeat blocked for more than 120 seconds`.
+- **Docker Volume Bind-Mount Safety**: Added defensive fallback in `_save_settings_dict` to gracefully handle environments where `guild_settings.json` is a Docker bind mount and atomic `os.replace` is restricted by the kernel (`EBUSY` / `EXDEV`).
 
 ### v1.6.0 (2026-10-23)
 - **Zero-Gap Next-Track Background Pre-Resolution**: Automatically resolves and caches the upcoming track's stream URL (`state.queue[0]`) in the background 3 seconds after playback begins, reducing track transition latency to `<1ms`.
