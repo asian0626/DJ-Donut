@@ -1,0 +1,42 @@
+[project]
+name = "dj-donut"
+version = "1.7.0"
+description = "Multi-room Discord music bot cluster"
+requires-python = ">=3.10"
+
+[tool.ruff]
+line-length = 160
+target-version = "py310"
+extend-exclude = [".venv", "venv", "build", "dist"]
+
+[tool.ruff.lint]
+select = ["E9", "F", "B", "ASYNC", "S", "PERF", "C90", "PIE", "SIM", "RUF"]
+ignore = ["S101", "S311", "S104", "RUF001", "RUF002", "RUF003", "PERF203"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+[tool.ruff.lint.per-file-ignores]
+# Package / facade modules intentionally re-export names.
+"__init__.py" = ["F401", "F403"]
+"config.py" = ["F401", "F403"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+pythonpath = ["."]
+filterwarnings = ["ignore::DeprecationWarning"]
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+check_untyped_defs = false
+warn_unused_ignores = true
+files = [
+    "*.py",
+    "core",
+    "commands",
+    "platforms",
+    "ui",
+    "tests",
+]

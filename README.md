@@ -2,7 +2,7 @@
 
 <div align="center">
 
-![Version](https://img.shields.io/badge/Version-v1.6.1-blue?logo=git)
+![Version](https://img.shields.io/badge/Version-v1.7.0-blue?logo=git)
 ![Python](https://img.shields.io/badge/Python-3.10%20%7C%203.11%20%7C%203.12-3776AB?logo=python&logoColor=white)
 ![Discord.py](https://img.shields.io/badge/Discord.py-v2.7.0%2B-5865F2?logo=discord&logoColor=white)
 ![Lavalink](https://img.shields.io/badge/Lavalink-v4.0%2B-FF3366?logo=audacity&logoColor=white)
@@ -25,11 +25,11 @@ You can invite the pre-hosted **DJ Donut** cluster directly to your server:
 
 | Bot Node | Invite Link | Default Permissions |
 | :--- | :--- | :--- |
-| **DJ Donut 1** | [Invite Bot 1](https://discord.com/oauth2/authorize?client_id=1549028983641743462&permissions=8&integration_type=0&scope=bot) | Administrator  |
-| **DJ Donut 2** | [Invite Bot 2](https://discord.com/oauth2/authorize?client_id=1549258600155979956&permissions=8&integration_type=0&scope=bot) | Administrator  |
-| **DJ Donut 3** | [Invite Bot 3](https://discord.com/oauth2/authorize?client_id=1549259098761990184&permissions=8&integration_type=0&scope=bot) | Administrator  |
-| **DJ Donut 4** | [Invite Bot 4](https://discord.com/oauth2/authorize?client_id=1549259563646062743&permissions=8&integration_type=0&scope=bot) | Administrator  |
-| **DJ Donut 5** | [Invite Bot 5](https://discord.com/oauth2/authorize?client_id=1549259919696592976&permissions=8&integration_type=0&scope=bot) | Administrator  |
+| **DJ Donut 1** | [Invite Bot 1](https://discord.com/oauth2/authorize?client_id=1549028983641743462&permissions=2150648832&integration_type=0&scope=bot+applications.commands) | Minimal (View / Send / Embed / Connect / Speak / Slash) |
+| **DJ Donut 2** | [Invite Bot 2](https://discord.com/oauth2/authorize?client_id=1549258600155979956&permissions=2150648832&integration_type=0&scope=bot+applications.commands) | Minimal (View / Send / Embed / Connect / Speak / Slash) |
+| **DJ Donut 3** | [Invite Bot 3](https://discord.com/oauth2/authorize?client_id=1549259098761990184&permissions=2150648832&integration_type=0&scope=bot+applications.commands) | Minimal (View / Send / Embed / Connect / Speak / Slash) |
+| **DJ Donut 4** | [Invite Bot 4](https://discord.com/oauth2/authorize?client_id=1549259563646062743&permissions=2150648832&integration_type=0&scope=bot+applications.commands) | Minimal (View / Send / Embed / Connect / Speak / Slash) |
+| **DJ Donut 5** | [Invite Bot 5](https://discord.com/oauth2/authorize?client_id=1549259919696592976&permissions=2150648832&integration_type=0&scope=bot+applications.commands) | Minimal (View / Send / Embed / Connect / Speak / Slash) |
 
 > 💡 **How Multi-Room Dispatch Works**:
 > When someone runs `/play` in any voice room, the dispatcher checks who is already in that channel. If none of the bots are in that room yet, it automatically grabs an idle bot and joins. If all 5 bots are invited to your server, up to 5 voice rooms can listen to completely different music at the same time.
@@ -47,8 +47,9 @@ You can invite the pre-hosted **DJ Donut** cluster directly to your server:
 - **Full Queue & Playback Control**: Jump to specific timestamps with `/seek`, randomize the queue with `/shuffle`, drop unwanted tracks with `/remove`, or wipe the list with `/clear`.
 - **Interactive Controller UI**: Real-time progress bar (`01:23 ━━━━━━🔘─────── 04:29`), platform-themed embed cards, and a 10-button controller for volume adjustments, seeking, looping, and lyrics.
 - **Synchronized Lyrics**: Fetch synchronized or plain-text lyrics on the fly via LRCLIB and NetEase without needing third-party API keys.
-- **Server Settings Persistence**: Volume levels, language preferences, 24/7 mode, bass boost, and audio filters are saved per-server in `guild_settings.json` and persist across bot reboots.
-- **Smart Autoplay**: Enable `/autoplay` to keep the music playing with stylistic recommendations once the queue finishes.
+- **Server Settings Persistence**: Volume levels, language preferences, 24/7 mode, bass boost, and audio filters are persisted in a non-blocking SQLite (WAL) database (`data/donut.db`, with automatic migration from legacy `guild_settings.json`), alongside active playback queue snapshots for seamless restart recovery.
+- **Smart Autoplay (Last.fm + YouTube)**: Enable `/autoplay` to keep the music playing with Last.fm `track.getSimilar` recommendations (when `LASTFM_API_KEY` is set) and cleaned-title YouTube fallback.
+- **Observability Endpoints**: Built-in HTTP server exposing `/healthz`, `/metrics` (Prometheus), and `/status` (JSON) on `127.0.0.1:8080`.
 - **Multilingual Support**: Supports English, Traditional Chinese, Simplified Chinese, Japanese, Korean, and Spanish. Automatically detects each user's client locale.
 - **Lightweight Footprint**: Typically runs within 80–120 MB RAM even with all 5 nodes active.
 
@@ -206,7 +207,16 @@ flowchart TD
 discord-music-bot/
 ├── main.py              # Lightweight cluster entrypoint & matrix initializer
 ├── bot.py               # Alternative entrypoint script
-├── config.py            # Global settings, presets, logger & BotError hierarchy
+├── settings.py          # Env tunables, audio presets, regexes & BotError hierarchy
+├── cache.py             # Bounded TTLCache for stream URLs and platform metadata
+├── ytdl.py              # Bounded yt-dlp thread pool & timeout wrapper (run_media)
+├── httpclient.py        # Shared async aiohttp ClientSession lifecycle
+├── storage.py           # Non-blocking SQLite (WAL) store for settings, favorites & queues
+├── metrics.py           # Prometheus /metrics, /healthz & /status HTTP server
+├── utils.py             # Time parsing/formatting & FFmpeg filter option builder
+├── config.py            # Backwards-compatible re-export facade
+├── locales/             # Externalized i18n JSON dictionaries (en, zh-TW, zh-CN, ja, ko, es)
+├── tests/               # Pytest unit test suite
 ├── core/
 │   ├── models.py        # Song, GuildMusicState & BufferedAudioSource
 │   ├── player.py        # Audio pipeline playback engine & play_next loop
@@ -231,6 +241,15 @@ discord-music-bot/
 ---
 
 ## Changelog
+
+### v1.7.0 (2026-11-06)
+- **Security Hardening (TLS & Minimal OAuth2 Permissions)**: Re-enabled TLS certificate verification across `yt-dlp` and the async Lavalink `/v4/info` health probe (opt-in `LAVALINK_INSECURE_TLS=1` for self-signed nodes). Updated bot invite URLs from `Administrator (8)` to minimal required permissions (`2150648832`: View Channel, Send Messages, Embed Links, Connect, Speak, Use Application Commands).
+- **Non-Blocking SQLite (WAL) Persistence & Queue Recovery**: Replaced synchronous full-file `guild_settings.json` rewrites with a write-behind SQLite store (`storage.py`, `data/donut.db`) with automatic legacy JSON migration. Added periodic and shutdown queue snapshots so active rooms automatically resume after restarts.
+- **Modular Architecture & Bounded Resources**: Split the monolithic `config.py` into focused modules (`settings.py`, `cache.py`, `ytdl.py`, `httpclient.py`, `storage.py`, `utils.py`, `metrics.py`), unified stream, metadata, lyrics, and autocomplete caches with `cachetools.TTLCache`, bounded `MEDIA_EXECUTOR` with timeouts (`run_media`), and removed legacy synchronous `urllib` scrapers.
+- **Discord UI View Lifecycle Fix & Circular Import Elimination**: Renamed `MusicControllerView.stop` (`-> stop_btn`) and `QueuePaginationView._refresh` (`-> _refresh_page`) so they no longer shadow `discord.ui.View.stop()` and `View._refresh()`, preventing `timeout=None` view memory leaks. Adopted PEP 562 lazy module exports in `core/__init__.py` to eliminate circular imports between `core` and `ui`.
+- **Full-Repository Type Safety & Complexity Reduction (`C901 <= 10`)**: Refactored all command handlers, platform resolvers, and playback loops so every function in the repository satisfies McCabe cyclomatic complexity `<= 10`, passes extended Ruff rules (`B`, `ASYNC`, `S`, `PERF`, `C90`, `PIE`, `SIM`, `RUF`), and passes `mypy` across all 30 source files with zero errors.
+- **Queue Cap, Cooldowns, Backoff & Last.fm Autoplay**: Added configurable queue size limits (`MAX_QUEUE_SIZE`), per-user slash command cooldowns, exponential backoff on consecutive stream failures, and optional Last.fm `track.getSimilar` autoplay recommendations.
+- **Externalized Locales, Observability, Tests & CI/CD**: Extracted 6-language translations into `locales/*.json`, added `/healthz`, `/metrics` (Prometheus), and `/status` endpoints, multi-stage `Dockerfile` with `requirements.lock` and `HEALTHCHECK`, unit tests (`pytest`), `ruff` + `mypy` checks, GitHub Actions CI, and Dependabot.
 
 ### v1.6.1 (2026-10-28)
 - **Eliminate Settings & Volume Deadlock**: Resolved a critical deadlock in `config.py` where calling `save_guild_setting` (e.g. clicking `🔊 +10%` / `🔉 -10%` volume buttons) or favorites functions when `_GUILD_SETTINGS_CACHE` was unset triggered re-entrant lock acquisition on `_SETTINGS_LOCK`. Replaced `threading.Lock` with `threading.RLock` and added `_load_settings_unlocked()`, completely eliminating asyncio loop thread freezes and `heartbeat blocked for more than 120 seconds`.

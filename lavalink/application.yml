@@ -14,7 +14,7 @@ lavalink:
       repository: "https://maven.lavalink.dev/releases"
 
   server:
-    password: "youshallnotpass"
+    password: "${LAVALINK_SERVER_PASSWORD}"
     sources:
       youtube: false # 由 dev.lavalink.youtube 接管
       bandcamp: true

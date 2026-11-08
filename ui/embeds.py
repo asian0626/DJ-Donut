@@ -1,15 +1,14 @@
+from typing import TYPE_CHECKING, Optional, Tuple
+
 import discord
-from typing import Optional, Tuple, Any
-from config import (
-    __version__,
-    BASSBOOST_PRESETS,
-    EQ_PRESETS,
-    format_duration,
-    parse_time_str
-)
-from core.models import Song, GuildMusicState, get_playback_elapsed
+
+from config import BASSBOOST_PRESETS, EQ_PRESETS, __version__, format_duration
+from core.models import GuildMusicState, Song, get_playback_elapsed
+from i18n import resolve_locale, t
 from lyrics import get_synced_lyrics_snippet
-from i18n import t, resolve_locale
+
+if TYPE_CHECKING:
+    from core.node import MusicNodeBot
 
 
 def make_progress_bar(elapsed: int, total: int, length: int = 14) -> str:
@@ -36,38 +35,45 @@ def get_platform_badge(url: str, uploader: str) -> Tuple[str, int]:
     return "YouTube Music", 0xFF0000
 
 
-def build_nowplaying_embed(bot: 'MusicNodeBot', song: Song, state: GuildMusicState, lang: Optional[str] = None) -> discord.Embed:
+def build_nowplaying_embed(bot: 'MusicNodeBot', song: Optional[Song], state: GuildMusicState, lang: Optional[str] = None) -> discord.Embed:
     guild_lang = lang or resolve_locale(guild_id=state.guild_id)
+    target_song = song or state.current
+    if not target_song:
+        return discord.Embed(title=t('not_playing', lang=guild_lang), color=0x5865F2)
+
     loop_str = t(f'loop_{state.loop_mode}', lang=guild_lang)
 
     guild = bot.get_guild(state.guild_id)
     vc = (guild.voice_client if guild else None) or discord.utils.get(getattr(bot, 'voice_clients', []), guild__id=state.guild_id)
     bitrate_str = "128 kbps"
-    if vc and hasattr(vc, 'channel') and vc.channel and hasattr(vc.channel, 'bitrate') and vc.channel.bitrate:
-        bitrate_str = f"{vc.channel.bitrate // 1000} kbps"
+    ch = getattr(vc, 'channel', None) if vc else None
+    ch_bitrate = getattr(ch, 'bitrate', None) if ch else None
+    if ch_bitrate:
+        bitrate_str = f"{ch_bitrate // 1000} kbps"
 
     bb_label = BASSBOOST_PRESETS.get(state.bassboost, {}).get("label", "關閉")
     eq_label = EQ_PRESETS.get(state.filter, {}).get("label", "原音直通")
-    platform_name, embed_color = get_platform_badge(song.url, song.uploader)
+    platform_name, embed_color = get_platform_badge(target_song.url, target_song.uploader)
 
     elapsed = get_playback_elapsed(state)
-    dur = song.duration or 0
+    dur = target_song.duration or 0
     progress_line = make_progress_bar(elapsed, dur, length=15)
 
     embed = discord.Embed(
         title=f"💿 正在播放 • {platform_name}",
-        description=f"### [{song.title}]({song.url})\n👤 演出者: **{song.uploader or '未知演出者'}**\n\n{progress_line}",
+        description=f"### [{target_song.title}]({target_song.url})\n👤 演出者: **{target_song.uploader or '未知演出者'}**\n\n{progress_line}",
         color=embed_color
     )
-    if song.thumbnail:
-        embed.set_thumbnail(url=song.thumbnail)
+    if target_song.thumbnail:
+        embed.set_thumbnail(url=target_song.thumbnail)
 
     if state.current_lyrics and state.current_lyrics[2]:
         snippet = get_synced_lyrics_snippet(state.current_lyrics[1], elapsed, context_lines=1)
         if snippet:
             embed.add_field(name="🎤 即時動態歌詞 (Synced Karaoke)", value=snippet, inline=False)
 
-    embed.add_field(name="👤 點播者", value=song.requester.mention, inline=True)
+    req_mention = getattr(target_song.requester, 'mention', '未知')
+    embed.add_field(name="👤 點播者", value=req_mention, inline=True)
     embed.add_field(name="🔊 音量", value=f"`{int(state.volume * 100)}%`", inline=True)
     embed.add_field(name="🔁 循環模式", value=f"`{loop_str}`", inline=True)
     embed.add_field(name="🎛️ 音訊引擎", value=f"`{state.active_engine}`", inline=True)
@@ -84,39 +90,42 @@ def build_nowplaying_embed(bot: 'MusicNodeBot', song: Song, state: GuildMusicSta
 def build_queue_embed(bot: 'MusicNodeBot', state: GuildMusicState, lang: Optional[str] = None, page: int = 1, per_page: int = 10) -> discord.Embed:
     guild_lang = lang or resolve_locale(guild_id=state.guild_id)
     embed = discord.Embed(
-        title=f"📜 【{bot.node_name}】語音房待播清單",
+        title=f"📜 【{bot.node_name}】待播清單與播放佇列",
         color=0x5865F2
     )
     if state.current:
+        cur = state.current
         elapsed = get_playback_elapsed(state)
-        dur = state.current.duration
+        dur = cur.duration or 0
         time_tag = f"`[{format_duration(elapsed)} / {format_duration(dur)}]`" if dur else "`[LIVE 直播]`"
-        embed.description = f"### ▶️ 現正播放\n**[{state.current.title}]({state.current.url})**\n{time_tag} • 由 {state.current.requester.mention} 點播\n"
-    else:
-        embed.description = "⏸️ **目前沒有正在播放的歌曲**\n使用 `/play <歌曲或網址>` 即可開始點播！\n"
-
-    if not state.queue:
+        req_m = getattr(cur.requester, 'mention', '未知')
         embed.add_field(
-            name="📋 待播歌曲 (0)",
-            value="*目前隊列為空，快使用 `/play` 點歌，或開啟 `/autoplay` 電台自動接歌！*",
+            name="▶️ 正在播放 (Now Playing)",
+            value=f"**[{cur.title}]({cur.url})**\n⏱️ {time_tag} • 👤 點播者: {req_m}",
             inline=False
         )
-        total_pages = 1
-        cur_page = 1
     else:
-        q_list = list(state.queue)
-        total_items = len(q_list)
-        total_pages = max(1, (total_items + per_page - 1) // per_page)
-        cur_page = max(1, min(page, total_pages))
-        start_idx = (cur_page - 1) * per_page
-        end_idx = start_idx + per_page
+        embed.add_field(name="▶️ 正在播放 (Now Playing)", value="*目前無正在播放的歌曲*", inline=False)
 
-        total_seconds = sum(s.duration for s in q_list if s.duration)
+    q_list = list(state.queue)
+    total_items = len(q_list)
+    total_pages = max(1, (total_items + per_page - 1) // per_page)
+    cur_page = max(1, min(page, total_pages))
+
+    if total_items == 0:
+        embed.add_field(name="📋 待播歌曲清單", value="*待播佇列目前是空的，輸入 `/play` 點播歌曲吧！*", inline=False)
+    else:
+        start_idx = (cur_page - 1) * per_page
+        end_idx = min(total_items, start_idx + per_page)
+        total_seconds = sum((s.duration or 0) for s in q_list)
         total_dur_str = format_duration(total_seconds) if total_seconds else "未知"
+
         queue_lines = []
-        for i, s in enumerate(q_list[start_idx:end_idx], start=start_idx + 1):
+        for idx in range(start_idx, end_idx):
+            s = q_list[idx]
             s_dur = f"`{format_duration(s.duration)}`" if s.duration else "`直播`"
-            queue_lines.append(f"`{i:02d}.` **[{s.title[:35]}]({s.url})** ({s_dur}) • {s.requester.mention}")
+            req_m = getattr(s.requester, 'mention', '未知')
+            queue_lines.append(f"`{idx + 1}.` [{s.title[:48]}]({s.url}) — {s_dur} ({req_m})")
 
         header_meta = f"總計 `{total_items}` 首歌曲 • 預估總時長 `{total_dur_str}` • 第 `{cur_page}/{total_pages}` 頁\n\n"
         embed.add_field(

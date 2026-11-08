@@ -4,9 +4,9 @@ from ui.embeds import (
     build_nowplaying_embed,
     build_queue_embed,
     build_song_queued_embed,
-    format_duration,
-    parse_time_str
+    format_duration
 )
+from utils import parse_time_str
 from ui.views import (
     MusicControllerView,
     SearchSelectView

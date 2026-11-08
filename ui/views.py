@@ -1,32 +1,36 @@
-import discord
-import asyncio
+from collections import deque
 import random
 import time
-from collections import deque
-from typing import Optional, List, Any
+from typing import TYPE_CHECKING, Any, Optional, Union
+
+import discord
+
 from config import (
-    save_guild_setting,
-    get_user_favorites,
+    MAX_QUEUE_SIZE,
     add_user_favorite,
-    MEDIA_EXECUTOR,
     format_duration,
-    logger
+    get_user_favorites,
+    logger,
+    save_guild_setting,
 )
 from core.models import (
-    Song,
     GuildMusicState,
-    safe_pause_resume,
-    safe_stop,
-    safe_disconnect,
+    Song,
+    get_playback_elapsed,
     has_dj_permission,
     is_vc_active,
     is_vc_connected,
+    safe_disconnect,
+    safe_pause_resume,
+    safe_stop,
     safe_voice_connect,
-    get_playback_elapsed
 )
+from i18n import resolve_locale, t
+from lyrics import format_clean_lyrics, get_lyrics_async
 from ui.embeds import build_nowplaying_embed, build_queue_embed
-from i18n import t, resolve_locale
-from lyrics import get_lyrics_async, format_clean_lyrics
+
+if TYPE_CHECKING:
+    from core.node import MusicNodeBot
 
 
 class QueuePaginationView(discord.ui.View):
@@ -42,7 +46,7 @@ class QueuePaginationView(discord.ui.View):
     def _total_pages(self) -> int:
         return max(1, (len(self.state.queue) + self.per_page - 1) // self.per_page)
 
-    def _sync_buttons(self):
+    def _sync_buttons(self) -> None:
         tp = self._total_pages()
         self.page = max(1, min(self.page, tp))
         for child in self.children:
@@ -54,7 +58,7 @@ class QueuePaginationView(discord.ui.View):
                 elif child.custom_id == "q_shuffle":
                     child.disabled = (len(self.state.queue) < 2)
 
-    async def _refresh(self, interaction: discord.Interaction):
+    async def _refresh_page(self, interaction: discord.Interaction) -> None:
         self._sync_buttons()
         embed = build_queue_embed(self.bot, self.state, lang=self.lang, page=self.page, per_page=self.per_page)
         await interaction.response.edit_message(embed=embed, view=self)
@@ -62,22 +66,22 @@ class QueuePaginationView(discord.ui.View):
     @discord.ui.button(emoji="⏮️", style=discord.ButtonStyle.secondary, custom_id="q_first")
     async def first_page(self, interaction: discord.Interaction, button: discord.ui.Button):
         self.page = 1
-        await self._refresh(interaction)
+        await self._refresh_page(interaction)
 
     @discord.ui.button(emoji="⬅️", style=discord.ButtonStyle.primary, custom_id="q_prev")
     async def prev_page(self, interaction: discord.Interaction, button: discord.ui.Button):
         self.page = max(1, self.page - 1)
-        await self._refresh(interaction)
+        await self._refresh_page(interaction)
 
     @discord.ui.button(emoji="➡️", style=discord.ButtonStyle.primary, custom_id="q_next")
     async def next_page(self, interaction: discord.Interaction, button: discord.ui.Button):
         self.page = min(self._total_pages(), self.page + 1)
-        await self._refresh(interaction)
+        await self._refresh_page(interaction)
 
     @discord.ui.button(emoji="⏭️", style=discord.ButtonStyle.secondary, custom_id="q_last")
     async def last_page(self, interaction: discord.Interaction, button: discord.ui.Button):
         self.page = self._total_pages()
-        await self._refresh(interaction)
+        await self._refresh_page(interaction)
 
     @discord.ui.button(label="隨機打亂", emoji="🔀", style=discord.ButtonStyle.success, custom_id="q_shuffle")
     async def shuffle_queue(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -88,7 +92,7 @@ class QueuePaginationView(discord.ui.View):
             q_list = list(self.state.queue)
             random.shuffle(q_list)
             self.state.queue = deque(q_list)
-        await self._refresh(interaction)
+        await self._refresh_page(interaction)
 
 
 class MusicControllerView(discord.ui.View):
@@ -98,7 +102,7 @@ class MusicControllerView(discord.ui.View):
         self.state = state
         self._update_button_states()
 
-    def _update_button_states(self):
+    def _update_button_states(self) -> None:
         is_paused = (self.state.pause_timestamp > 0)
         for child in self.children:
             if isinstance(child, discord.ui.Button):
@@ -125,9 +129,10 @@ class MusicControllerView(discord.ui.View):
                 elif child.custom_id == "music_autoplay":
                     child.style = discord.ButtonStyle.success if self.state.autoplay else discord.ButtonStyle.secondary
 
-    def _get_vc(self, interaction: discord.Interaction):
-        bot_guild = self.bot.get_guild(interaction.guild_id) or interaction.guild
-        return (bot_guild.voice_client if bot_guild else None) or discord.utils.get(getattr(self.bot, 'voice_clients', []), guild__id=interaction.guild_id)
+    def _get_vc(self, interaction: discord.Interaction) -> Any:
+        gid = interaction.guild_id or self.state.guild_id
+        bot_guild = self.bot.get_guild(gid) or interaction.guild
+        return (bot_guild.voice_client if bot_guild else None) or discord.utils.get(getattr(self.bot, 'voice_clients', []), guild__id=gid)
 
     @discord.ui.button(emoji="⏮️", style=discord.ButtonStyle.secondary, row=0, custom_id="music_replay")
     async def replay(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -143,16 +148,18 @@ class MusicControllerView(discord.ui.View):
 
     @discord.ui.button(emoji="⏯️", style=discord.ButtonStyle.primary, row=0, custom_id="music_play_pause")
     async def play_pause(self, interaction: discord.Interaction, button: discord.ui.Button):
-        bot_guild = self.bot.get_guild(interaction.guild_id) or interaction.guild
+        gid = interaction.guild_id or self.state.guild_id
+        bot_guild = self.bot.get_guild(gid) or interaction.guild
         vc = self._get_vc(interaction)
         if not vc:
             await interaction.response.send_message(t('no_bot_in_room', interaction), ephemeral=True)
             return
         self.state.last_active = time.time()
         if not is_vc_connected(vc):
-            user_voice = interaction.user.voice.channel if (interaction.user and interaction.user.voice) else None
+            vstate = getattr(interaction.user, 'voice', None)
+            user_voice = getattr(vstate, 'channel', None) if vstate else None
             target_ch = user_voice or getattr(vc, 'channel', None) or self.state.voice_channel
-            if target_ch:
+            if isinstance(target_ch, discord.VoiceChannel):
                 vc = await safe_voice_connect(self.bot, target_ch, timeout=30.0)
         await interaction.response.defer()
         await safe_pause_resume(vc, self.state, bot=self.bot, guild=bot_guild)
@@ -161,7 +168,7 @@ class MusicControllerView(discord.ui.View):
         try:
             await interaction.edit_original_response(embed=embed, view=self)
         except Exception:
-            pass
+            logger.debug("Ignored exception in play_pause", exc_info=True)
 
     @discord.ui.button(emoji="⏭️", style=discord.ButtonStyle.secondary, row=0, custom_id="music_skip")
     async def skip(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -191,7 +198,7 @@ class MusicControllerView(discord.ui.View):
         await interaction.response.edit_message(embed=embed, view=self)
 
     @discord.ui.button(emoji="⏹️", style=discord.ButtonStyle.danger, row=0, custom_id="music_stop")
-    async def stop(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def stop_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not has_dj_permission(interaction, self.state):
             await interaction.response.send_message(t('dj_permission_denied', interaction, role_id=self.state.dj_role_id), ephemeral=True)
             return
@@ -305,8 +312,11 @@ class MusicControllerView(discord.ui.View):
         if not favs:
             await interaction.response.send_message("⭐ 您的個人收藏清單目前是空的！先按旁邊的 `❤️ 收藏` 將喜歡的歌曲存起來吧！", ephemeral=True)
             return
+        if self.state.queue_space() <= 0:
+            await interaction.response.send_message(t('queue_full', interaction, max_size=MAX_QUEUE_SIZE), ephemeral=True)
+            return
         added_count = 0
-        for item in favs:
+        for item in favs[:self.state.queue_space()]:
             if not isinstance(item, dict) or not item.get("title"):
                 continue
             s = Song({
@@ -339,8 +349,14 @@ class MusicControllerView(discord.ui.View):
         await interaction.response.send_message(t('shuffle_success', interaction, count=len(self.state.queue)), ephemeral=True)
 
 
+class _SearchSelectMenu(discord.ui.Select['SearchSelectView']):
+    async def callback(self, interaction: discord.Interaction) -> None:
+        if self.view is not None:
+            await self.view.on_select(interaction)
+
+
 class SearchSelectView(discord.ui.View):
-    def __init__(self, bot: 'MusicNodeBot', guild: discord.Guild, user: discord.Member, results: list):
+    def __init__(self, bot: 'MusicNodeBot', guild: Optional[discord.Guild], user: Union[discord.Member, discord.User], results: list):
         super().__init__(timeout=60)
         self.bot = bot
         self.guild = guild
@@ -358,18 +374,21 @@ class SearchSelectView(discord.ui.View):
                 description=f"時長: {dur} | 上傳者: {uploader}"[:100]
             ))
 
-        self.select_menu = discord.ui.Select(
+        self.select_menu: _SearchSelectMenu = _SearchSelectMenu(
             placeholder="請點選此處挑選欲播放的歌曲...",
             min_values=1,
             max_values=1,
             options=options
         )
-        self.select_menu.callback = self.on_select
         self.add_item(self.select_menu)
 
-    async def on_select(self, interaction: discord.Interaction):
+    async def on_select(self, interaction: discord.Interaction) -> None:
         if interaction.user.id != self.user.id:
             await interaction.response.send_message("❌ 只有發起搜尋的人才能選擇歌曲！", ephemeral=True)
+            return
+
+        guild = self.guild or interaction.guild
+        if not guild:
             return
 
         idx = int(self.select_menu.values[0])
@@ -393,8 +412,12 @@ class SearchSelectView(discord.ui.View):
             'uploader': item.get('uploader', '未知上傳者')
         }, interaction.user)
 
-        state = self.bot.get_state(self.guild.id)
-        state.text_channel = interaction.channel
+        state = self.bot.get_state(guild.id)
+        if state.queue_space() <= 0:
+            await interaction.response.send_message(t('queue_full', interaction, max_size=MAX_QUEUE_SIZE), ephemeral=True)
+            return
+        if isinstance(interaction.channel, discord.TextChannel):
+            state.text_channel = interaction.channel
         state.queue.append(song)
 
         self.select_menu.disabled = True
@@ -414,12 +437,11 @@ class SearchSelectView(discord.ui.View):
 
         from core.dispatcher import get_bot_guild
         from core.player import play_next
-        bot_guild = get_bot_guild(self.bot, self.guild.id, interaction.guild) or self.guild
-        vc = (bot_guild.voice_client if bot_guild else None) or discord.utils.get(getattr(self.bot, 'voice_clients', []), guild__id=self.guild.id)
-        if not is_vc_active(vc):
+        bot_guild = get_bot_guild(self.bot, guild.id, interaction.guild) or guild
+        vc = (bot_guild.voice_client if bot_guild else None) or discord.utils.get(getattr(self.bot, 'voice_clients', []), guild__id=guild.id)
+        if not is_vc_active(vc) and bot_guild:
             await play_next(self.bot, bot_guild)
 
-    async def on_timeout(self):
-        for item in self.children:
-            item.disabled = True
+    async def on_timeout(self) -> None:
+        self.select_menu.disabled = True
         self.stop()
