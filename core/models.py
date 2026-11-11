@@ -23,10 +23,18 @@ from config import (
 
 
 class BufferedAudioSource(discord.AudioSource):
-    def __init__(self, source: discord.AudioSource, prefetch_frames: int = 50, max_frames: int = 500):
+    def __init__(
+        self,
+        source: discord.AudioSource,
+        prefetch_frames: int = 50,
+        max_frames: int = 500,
+        max_silence_frames: int = 300,
+    ):
         self.source = source
         self.buffer: "queue.Queue[bytes]" = queue.Queue(maxsize=max_frames)
         self.prefetch_frames = prefetch_frames
+        self.max_silence_frames = max_silence_frames
+        self._consecutive_silence = 0
         self._stop_event = threading.Event()
         self._finished = False
         self._started = False
@@ -66,9 +74,20 @@ class BufferedAudioSource(discord.AudioSource):
         if self._stop_event.is_set():
             return b''
         try:
-            return self.buffer.get_nowait()
+            data = self.buffer.get_nowait()
+            self._consecutive_silence = 0
+            return data
         except queue.Empty:
             if self._finished and self.buffer.empty():
+                return b''
+            self._consecutive_silence += 1
+            if self._consecutive_silence >= self.max_silence_frames:
+                logger.warning(
+                    "BufferedAudioSource 緩衝區連續飢餓達 %d 幀 (約 %.1f 秒)，判定串流中斷並強制結束",
+                    self._consecutive_silence,
+                    self._consecutive_silence * 0.02,
+                )
+                self._finished = True
                 return b''
             return bytes(3840)
 

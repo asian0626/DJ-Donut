@@ -12,6 +12,7 @@ Design goals
   on every change" approach. A legacy ``guild_settings.json`` is imported
   automatically on first run.
 """
+import contextlib
 import copy
 import json
 import logging
@@ -78,8 +79,9 @@ class Storage:
             try:
                 conn.execute("PRAGMA journal_mode=WAL")
                 conn.execute("PRAGMA synchronous=NORMAL")
+                conn.execute("PRAGMA wal_autocheckpoint=1000")
             except sqlite3.Error:
-                logger.debug("Could not enable WAL", exc_info=True)
+                logger.debug("Could not enable WAL / autocheckpoint", exc_info=True)
             conn.executescript(_SCHEMA)
             conn.commit()
             self._conn = conn
@@ -226,6 +228,8 @@ class Storage:
         self.flush()
         with self._db_lock:
             if self._conn is not None:
+                with contextlib.suppress(sqlite3.Error):
+                    self._conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
                 try:
                     self._conn.close()
                 finally:

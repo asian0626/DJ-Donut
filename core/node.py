@@ -7,6 +7,7 @@ import discord
 from discord.ext import commands
 
 from config import (
+    FORCE_LAVALINK,
     HAS_WAVELINK,
     LAVALINK_INSECURE_TLS,
     LAVALINK_PASSWORD,
@@ -84,10 +85,10 @@ class MusicNodeBot(commands.Bot):
     async def _init_lavalink_if_configured(self) -> None:
         if not (HAS_WAVELINK and LAVALINK_URI):
             return
-        if len(TOKENS) > 1:
+        if len(TOKENS) > 1 and not FORCE_LAVALINK:
             self.lavalink_connected = False
             if self.node_id == 1:
-                logger.info(f"[{self.node_name}] 🎛️ 檢測到啟用多機矩陣 ({len(TOKENS)} 隻機器人)，為確保各語音房 100% 獨立純淨音訊與發送無衝突，全面啟用極限調校原生獨立引擎！")
+                logger.info(f"[{self.node_name}] 🎛️ 檢測到啟用多機矩陣 ({len(TOKENS)} 隻機器人)，為確保各語音房 100% 獨立純淨音訊與發送無衝突，全面啟用極限調校原生獨立引擎！(如需強制使用外部 Lavalink，請設置 FORCE_LAVALINK=1)")
             return
         if not await check_lavalink_health(LAVALINK_URI, LAVALINK_PASSWORD):
             self.lavalink_connected = False

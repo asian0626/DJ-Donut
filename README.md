@@ -2,7 +2,7 @@
 
 <div align="center">
 
-![Version](https://img.shields.io/badge/Version-v1.7.0-blue?logo=git)
+![Version](https://img.shields.io/badge/Version-v1.7.1-blue?logo=git)
 ![Python](https://img.shields.io/badge/Python-3.10%20%7C%203.11%20%7C%203.12-3776AB?logo=python&logoColor=white)
 ![Discord.py](https://img.shields.io/badge/Discord.py-v2.7.0%2B-5865F2?logo=discord&logoColor=white)
 ![Lavalink](https://img.shields.io/badge/Lavalink-v4.0%2B-FF3366?logo=audacity&logoColor=white)
@@ -241,6 +241,15 @@ discord-music-bot/
 ---
 
 ## Changelog
+
+### v1.7.1 (2026-11-11)
+- **Audio Pipeline Hardening (-threads 1 & Silence Starvation Protection)**: Enforced `-threads 1` in `utils.py:get_ffmpeg_options()` to prevent multi-bot FFmpeg decoding spikes on multi-core servers. Added buffer starvation protection in `BufferedAudioSource` (auto-terminates stalled/dropped streams after 300 empty frames / 6 seconds instead of playing silent audio endlessly).
+- **Discord UI/UX Timeout Safety**: Implemented graceful `on_timeout` handling for `QueuePaginationView` and `SearchSelectView` that disables UI controls and edits the active message, eliminating `Interaction failed` errors when users interact with expired views.
+- **Immediate /seek Controller Refresh**: Automatically updates `nowplaying_message` embed right after `/seek` executes so users instantly see their new playback position.
+- **Multi-Node Lavalink Flexibility (`FORCE_LAVALINK`)**: Added `FORCE_LAVALINK=1` toggle allowing multi-bot clusters to retain commercial Lavalink passthrough across all bot nodes instead of auto-fallback to FFmpeg.
+- **SQLite WAL Auto-Checkpoint & Truncate**: Configured `PRAGMA wal_autocheckpoint=1000` and `PRAGMA wal_checkpoint(TRUNCATE)` on shutdown to prevent unbounded SQLite WAL file growth.
+- **Sentry Crash Monitoring Integration**: Added `SENTRY_DSN` support in `main.py` with `AioHttpIntegration` and logging handlers for enterprise-grade real-time exception tracking.
+- **DevOps CI/CD Workflow**: Added GitHub Actions workflow (`.github/workflows/ci.yml`) running matrix testing across Python 3.10–3.12, Ruff linting, and Docker build validation.
 
 ### v1.7.0 (2026-11-06)
 - **Security Hardening (TLS & Minimal OAuth2 Permissions)**: Re-enabled TLS certificate verification across `yt-dlp` and the async Lavalink `/v4/info` health probe (opt-in `LAVALINK_INSECURE_TLS=1` for self-signed nodes). Updated bot invite URLs from `Administrator (8)` to minimal required permissions (`2150648832`: View Channel, Send Messages, Embed Links, Connect, Speak, Use Application Commands).

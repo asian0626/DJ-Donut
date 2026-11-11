@@ -61,6 +61,7 @@ def test_get_ffmpeg_options():
     opts = get_ffmpeg_options(state)
     assert opts["options"] == "-vn"
     assert "-ss" not in opts["before_options"]
+    assert "-threads 1" in opts["before_options"]
 
     state_fx = SimpleNamespace(bassboost="medium", filter="nightcore")
     opts_fx = get_ffmpeg_options(state_fx, seek_seconds=30)
@@ -239,4 +240,51 @@ async def test_metrics_and_health_endpoints():
         text = await r.text()
         assert "donut_active_rooms 1" in text
         assert 'donut_node_ready{node="1"} 1' in text
+
+
+# ---------- audio buffer starvation & settings tests ----------
+
+def test_buffered_audio_source_starvation():
+    import discord
+    from core.models import BufferedAudioSource
+
+    class StalledAudioSource(discord.AudioSource):
+        def read(self):
+            # Simulates a stalled/hung stream that never finishes or returns data
+            time.sleep(10)
+            return b''
+
+    dummy = StalledAudioSource()
+    buf = BufferedAudioSource(dummy, prefetch_frames=5, max_frames=20, max_silence_frames=5)
+    try:
+        # Before timeout, should return 3840 bytes of silence for first few frames
+        for _ in range(4):
+            frame = buf.read()
+            assert frame == bytes(3840)
+        # 5th frame reaches max_silence_frames (5), should terminate with empty bytes b''
+        frame = buf.read()
+        assert frame == b''
+        assert buf._finished is True
+    finally:
+        buf.cleanup()
+
+
+def test_force_lavalink_and_sentry_settings():
+    from settings import FORCE_LAVALINK, SENTRY_DSN
+    assert isinstance(FORCE_LAVALINK, bool)
+    assert isinstance(SENTRY_DSN, str)
+
+
+def test_sqlite_wal_autocheckpoint(tmp_path):
+    db_file = str(tmp_path / "test_wal.db")
+    storage = Storage(db_file, debounce=0.1)
+    try:
+        conn = storage._connect()
+        # Verify PRAGMA wal_autocheckpoint is active
+        cur = conn.execute("PRAGMA wal_autocheckpoint")
+        val = cur.fetchone()[0]
+        assert val == 1000
+    finally:
+        storage.close()
+
 

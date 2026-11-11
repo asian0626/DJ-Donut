@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-__version__ = "1.7.0"
+__version__ = "1.7.1"
 
 logging.basicConfig(
     level=logging.INFO,
@@ -127,6 +127,7 @@ LEGACY_SETTINGS_FILE = os.path.join(BASE_DIR, "guild_settings.json")
 
 # Only enable for a self-signed Lavalink node. Never disable verification globally.
 LAVALINK_INSECURE_TLS = _env_bool("LAVALINK_INSECURE_TLS", False)
+FORCE_LAVALINK = _env_bool("FORCE_LAVALINK", False)
 
 MEDIA_WORKERS = _env_int("MEDIA_WORKERS", 6, minimum=1)
 MEDIA_TIMEOUT = _env_int("MEDIA_TIMEOUT", 60, minimum=5)
@@ -139,3 +140,4 @@ METRICS_HOST = os.getenv("METRICS_HOST", "127.0.0.1").strip() or "127.0.0.1"
 METRICS_PORT = _env_int("METRICS_PORT", 8080)  # 0 disables the HTTP endpoint
 
 LASTFM_API_KEY = os.getenv("LASTFM_API_KEY", "").strip()
+SENTRY_DSN = os.getenv("SENTRY_DSN", "").strip()

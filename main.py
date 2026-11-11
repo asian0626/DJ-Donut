@@ -1,8 +1,10 @@
 import asyncio
 import contextlib
+import logging
 import signal
 from config import (
     __version__,
+    SENTRY_DSN,
     TOKENS,
     close_http_session,
     logger,
@@ -13,6 +15,30 @@ from core.node import (
 )
 from metrics import start_metrics_server
 from storage import close_storage
+
+
+def _init_sentry() -> None:
+    if not SENTRY_DSN:
+        return
+    try:
+        import sentry_sdk
+        from sentry_sdk.integrations.aiohttp import AioHttpIntegration
+        from sentry_sdk.integrations.logging import LoggingIntegration
+
+        sentry_sdk.init(
+            dsn=SENTRY_DSN,
+            integrations=[
+                AioHttpIntegration(),
+                LoggingIntegration(level=None, event_level=logging.ERROR),
+            ],
+            release=f"dj-donut@{__version__}",
+            traces_sample_rate=0.1,
+        )
+        logger.info("🛡️ Sentry 錯誤追蹤已成功啟用！")
+    except ImportError:
+        logger.warning("已配置 SENTRY_DSN 但未安裝 sentry-sdk，如需啟用錯誤監控可執行 pip install 'sentry-sdk[aiohttp]'")
+    except Exception as e:
+        logger.warning(f"Sentry 初始化失敗: {e}")
 
 
 async def _shutdown_cluster(tasks: list, metrics_runner: object) -> None:
@@ -51,6 +77,8 @@ async def main() -> None:
     print("=" * 65)
     print(f"🚀 正在初始化多房間音樂機器人矩陣 v{__version__} (共檢測到 {len(TOKENS)} 隻機器人配置)...")
     print("=" * 65)
+
+    _init_sentry()
 
     loop = asyncio.get_running_loop()
     stop_event = asyncio.Event()

@@ -32,6 +32,10 @@ wheels/
 # Logs & Database
 *.log
 logs/
+data/
+*.db
+*.db-wal
+*.db-shm
 
 # Operating System
 .DS_Store

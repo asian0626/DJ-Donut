@@ -728,7 +728,8 @@ async def _handle_search(interaction: discord.Interaction, keyword: str) -> None
         )
 
     view = SearchSelectView(selected_bot, bot_guild, interaction.user, entries)
-    await interaction.followup.send(embed=embed, view=view)
+    msg = await interaction.followup.send(embed=embed, view=view)
+    view.message = msg
 
 
 async def _handle_skip(interaction: discord.Interaction) -> None:
@@ -878,6 +879,10 @@ async def _handle_queue(interaction: discord.Interaction) -> None:
     embed = build_queue_embed(b, state, lang=lang, page=1)
     view = QueuePaginationView(b, state, lang=lang)
     await interaction.response.send_message(embed=embed, view=view)
+    try:
+        view.message = await interaction.original_response()
+    except Exception:
+        logger.debug("Failed to get original_response for QueuePaginationView", exc_info=True)
 
 
 async def _handle_move(interaction: discord.Interaction, from_pos: int, to_pos: int) -> None:

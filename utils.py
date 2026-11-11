@@ -23,7 +23,7 @@ def format_duration(seconds: Optional[int], lang: str = 'zh-TW') -> str:
 
 def get_ffmpeg_options(state: Any, seek_seconds: Optional[int] = None) -> dict:
     before_parts = [
-        '-nostats -loglevel fatal',
+        '-nostats -loglevel fatal -threads 1',
         f'-headers "User-Agent: {STREAM_USER_AGENT}\r\nAccept: */*\r\nAccept-Language: en-US,en;q=0.9\r\n"',
         '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -reconnect_on_network_error 1 -reconnect_on_http_error 4xx,5xx',
         '-probesize 64k -analyzeduration 500000'

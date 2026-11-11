@@ -41,6 +41,7 @@ class QueuePaginationView(discord.ui.View):
         self.lang = lang
         self.per_page = per_page
         self.page = 1
+        self.message: Optional[discord.Message] = None
         self._sync_buttons()
 
     def _total_pages(self) -> int:
@@ -62,6 +63,17 @@ class QueuePaginationView(discord.ui.View):
         self._sync_buttons()
         embed = build_queue_embed(self.bot, self.state, lang=self.lang, page=self.page, per_page=self.per_page)
         await interaction.response.edit_message(embed=embed, view=self)
+
+    async def on_timeout(self) -> None:
+        for child in self.children:
+            if isinstance(child, (discord.ui.Button, discord.ui.Select)):
+                child.disabled = True
+        self.stop()
+        if self.message:
+            try:
+                await self.message.edit(view=self)
+            except Exception:
+                logger.debug("Failed to disable QueuePaginationView on timeout", exc_info=True)
 
     @discord.ui.button(emoji="⏮️", style=discord.ButtonStyle.secondary, custom_id="q_first")
     async def first_page(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -280,6 +292,10 @@ class MusicControllerView(discord.ui.View):
         embed = build_queue_embed(self.bot, self.state, lang=lang, page=1)
         view = QueuePaginationView(self.bot, self.state, lang=lang)
         await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+        try:
+            view.message = await interaction.original_response()
+        except Exception:
+            logger.debug("Failed to get original_response for QueuePaginationView", exc_info=True)
 
     @discord.ui.button(label="收藏", emoji="❤️", style=discord.ButtonStyle.secondary, row=2, custom_id="music_fav_add")
     async def fav_add(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -362,6 +378,7 @@ class SearchSelectView(discord.ui.View):
         self.guild = guild
         self.user = user
         self.results = results
+        self.message: Optional[discord.Message] = None
 
         options = []
         for i, item in enumerate(results[:5]):
@@ -445,3 +462,8 @@ class SearchSelectView(discord.ui.View):
     async def on_timeout(self) -> None:
         self.select_menu.disabled = True
         self.stop()
+        if self.message:
+            try:
+                await self.message.edit(view=self)
+            except Exception:
+                logger.debug("Failed to disable SearchSelectView on timeout", exc_info=True)

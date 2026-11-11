@@ -38,6 +38,31 @@ from ui.embeds import format_duration
 from utils import parse_time_str
 
 
+async def _resolve_seek_stream(state: GuildMusicState) -> Optional[str]:
+    if not state.current:
+        return None
+    stream_url = getattr(state.current, 'stream_url', '')
+    if not stream_url or not stream_url.startswith('http'):
+        cur_url = state.current.url
+        cur_title = state.current.title
+        stream_url, _, _ = await run_media(
+            lambda u=cur_url, ti=cur_title: extract_stream_url_sync(u, ti)
+        )
+    if stream_url:
+        state.current.stream_url = stream_url
+    return stream_url
+
+
+async def _refresh_nowplaying_after_seek(b: MusicNodeBot, state: GuildMusicState) -> None:
+    if state.nowplaying_message and state.current:
+        try:
+            from ui.embeds import build_nowplaying_embed
+            embed = build_nowplaying_embed(b, state.current, state)
+            await state.nowplaying_message.edit(embed=embed)
+        except Exception:
+            logger.debug("Failed to update nowplaying embed after seek", exc_info=True)
+
+
 async def _seek_native_ffmpeg(
     interaction: discord.Interaction,
     b: MusicNodeBot,
@@ -50,19 +75,12 @@ async def _seek_native_ffmpeg(
         return
     await interaction.response.defer()
     state.is_seeking = True
-    stream_url = getattr(state.current, 'stream_url', '')
-    if not stream_url or not stream_url.startswith('http'):
-        cur_url = state.current.url
-        cur_title = state.current.title
-        stream_url, _, _ = await run_media(
-            lambda u=cur_url, ti=cur_title: extract_stream_url_sync(u, ti)
-        )
+    stream_url = await _resolve_seek_stream(state)
     if not stream_url:
         state.is_seeking = False
         await interaction.followup.send("❌ 無法提取音訊串流以執行跳轉！", ephemeral=True)
         return
 
-    state.current.stream_url = stream_url
     if is_vc_playing(vc) or is_vc_paused(vc):
         await safe_stop(vc)
 
@@ -89,6 +107,7 @@ async def _seek_native_ffmpeg(
         state.pause_timestamp = 0.0
         state.is_seeking = False
         state.last_active = time.time()
+        await _refresh_nowplaying_after_seek(b, state)
         await interaction.followup.send(t('seek_success', interaction, time_str=format_duration(target_sec)))
     except Exception as e:
         state.is_seeking = False
