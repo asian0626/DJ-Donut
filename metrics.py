@@ -141,10 +141,37 @@ def create_app(get_bots: Callable[[], Sequence[Any]]) -> web.Application:
     async def status(_: web.Request) -> web.Response:
         return web.json_response(build_status(get_bots()))
 
+    async def diag(_: web.Request) -> web.Response:
+        bots = get_bots()
+        info = []
+        for b in bots:
+            for gid, s in getattr(b, "states", {}).items():
+                vc = getattr(b, "voice_clients", [])
+                matching_vc = next((v for v in vc if getattr(v, "guild", None) and v.guild.id == gid), None)
+                v_conn = getattr(matching_vc, "_connection", None)
+                members = []
+                if s.voice_channel and hasattr(s.voice_channel, "members"):
+                    members = [{"name": m.name, "id": m.id, "bot": m.bot} for m in s.voice_channel.members]
+                info.append({
+                    "node_id": b.node_id,
+                    "guild_id": gid,
+                    "is_playing": s.is_playing,
+                    "song": getattr(s.current, "title", None) if s.current else None,
+                    "channel_name": getattr(s.voice_channel, "name", None),
+                    "members": members,
+                    "vc_connected": matching_vc.is_connected() if matching_vc else False,
+                    "vc_playing": matching_vc.is_playing() if matching_vc else False,
+                    "vc_mode": getattr(matching_vc, "mode", None),
+                    "dave_version": getattr(v_conn, "dave_protocol_version", None),
+                    "can_encrypt": getattr(v_conn, "can_encrypt", None),
+                })
+        return web.json_response(info)
+
     app = web.Application()
     app.router.add_get("/healthz", healthz)
     app.router.add_get("/metrics", metrics)
     app.router.add_get("/status", status)
+    app.router.add_get("/diag", diag)
     return app
 
 

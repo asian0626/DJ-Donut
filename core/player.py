@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import time
 from typing import Any, Optional
 
@@ -101,39 +102,57 @@ async def _preload_and_lyrics_worker(bot: Any, guild: discord.Guild, state: Guil
         logger.debug("Ignored exception in _preload_and_lyrics_worker", exc_info=True)
 
 
+def _resolve_target_text_channel(guild: Optional[discord.Guild], state: GuildMusicState) -> Optional[Any]:
+    if state.text_channel:
+        return state.text_channel
+    if not guild:
+        return None
+    if state.voice_channel and hasattr(state.voice_channel, 'send'):
+        state.text_channel = state.voice_channel
+        return state.voice_channel
+    state.text_channel = guild.system_channel or next(
+        (c for c in guild.text_channels if c.permissions_for(guild.me).send_messages), None
+    )
+    return state.text_channel
+
+
 async def _send_clean_nowplaying(bot: Any, guild: discord.Guild, state: GuildMusicState, song: Song) -> None:
-    if not state.text_channel and guild:
-        state.text_channel = guild.system_channel or next(
-            (c for c in guild.text_channels if c.permissions_for(guild.me).send_messages), None
-        )
-    if not state.text_channel:
+    target_channel = _resolve_target_text_channel(guild, state)
+    if not target_channel:
+        logger.warning(f"[{bot.node_name}] 未能為伺服器【{guild.name}】找到可發送 Now Playing 卡片的文字頻道")
         return
+
     if state.current_view:
-        try:
+        with contextlib.suppress(Exception):
             state.current_view.stop()
-        except Exception:
-            logger.debug("Ignored exception in _send_clean_nowplaying", exc_info=True)
     state.cancel_progress_task()
     state.cancel_preload_task()
 
     old_msg = state.nowplaying_message
     state.nowplaying_message = None
     if old_msg:
-        try:
+        with contextlib.suppress(Exception):
             await old_msg.delete()
-        except Exception:
-            logger.debug("Ignored exception in _send_clean_nowplaying", exc_info=True)
 
     embed = build_nowplaying_embed(bot, song, state)
     view = MusicControllerView(bot, state)
     state.current_view = view
+
+    msg = None
     try:
-        msg = await state.text_channel.send(embed=embed, view=view)
+        msg = await target_channel.send(embed=embed, view=view)
+    except Exception as e:
+        logger.warning(f"[{bot.node_name}] 發送 Now Playing 卡片失敗至 {getattr(target_channel, 'name', target_channel)}: {e}")
+        vch = state.voice_channel
+        if vch and vch != target_channel and hasattr(vch, 'send'):
+            with contextlib.suppress(Exception):
+                msg = await vch.send(embed=embed, view=view)
+                state.text_channel = vch
+
+    if msg:
         state.nowplaying_message = msg
         state.progress_task = bot.loop.create_task(_progress_updater(bot, guild, state, song, msg))
         state.preload_task = bot.loop.create_task(_preload_and_lyrics_worker(bot, guild, state, song))
-    except Exception:
-        logger.debug("Ignored exception in _send_clean_nowplaying", exc_info=True)
 
 
 def _failure_backoff(failures: int) -> float:

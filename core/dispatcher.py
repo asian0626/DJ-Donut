@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, Any, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, List, Optional, Tuple, Union
 
 import discord
 
@@ -120,23 +120,23 @@ def get_bot_in_user_room(
     return None
 
 
-async def get_user_voice_channel(interaction: discord.Interaction) -> Optional[discord.VoiceChannel]:
+async def get_user_voice_channel(interaction: discord.Interaction) -> Optional[Union[discord.VoiceChannel, discord.StageChannel]]:
     user_voice = getattr(interaction.user, 'voice', None)
     ch = getattr(user_voice, 'channel', None) if user_voice else None
-    if isinstance(ch, discord.VoiceChannel):
+    if isinstance(ch, (discord.VoiceChannel, discord.StageChannel)):
         return ch
 
     guild = interaction.guild
     if not guild:
         return None
 
-    if isinstance(interaction.channel, discord.VoiceChannel):
+    if isinstance(interaction.channel, (discord.VoiceChannel, discord.StageChannel)):
         return interaction.channel
 
     member = guild.get_member(interaction.user.id)
     m_voice = getattr(member, 'voice', None) if member else None
     m_ch = getattr(m_voice, 'channel', None) if m_voice else None
-    if isinstance(m_ch, discord.VoiceChannel):
+    if isinstance(m_ch, (discord.VoiceChannel, discord.StageChannel)):
         return m_ch
 
     for vc in guild.voice_channels:
@@ -147,7 +147,7 @@ async def get_user_voice_channel(interaction: discord.Interaction) -> Optional[d
         fetched_member = await guild.fetch_member(interaction.user.id)
         f_voice = getattr(fetched_member, 'voice', None) if fetched_member else None
         f_ch = getattr(f_voice, 'channel', None) if f_voice else None
-        if isinstance(f_ch, discord.VoiceChannel):
+        if isinstance(f_ch, (discord.VoiceChannel, discord.StageChannel)):
             return f_ch
     except Exception:
         logger.debug("Ignored exception in get_user_voice_channel", exc_info=True)

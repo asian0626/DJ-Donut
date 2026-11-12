@@ -1,5 +1,6 @@
 import asyncio
 from collections import deque
+import contextlib
 import queue
 import re
 import threading
@@ -7,6 +8,10 @@ import time
 from typing import Any, Optional, Tuple
 
 import discord
+import discord.voice_state
+
+with contextlib.suppress(Exception):
+    discord.voice_state.VoiceConnectionState.max_dave_protocol_version = property(lambda self: 0)
 
 from config import (
     BASSBOOST_PRESETS,

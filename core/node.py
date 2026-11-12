@@ -279,9 +279,12 @@ class MusicNodeBot(commands.Bot):
             if tch_id:
                 st.text_channel = guild.get_channel(tch_id)
             if not st.text_channel and guild:
-                st.text_channel = guild.system_channel or next(
-                    (c for c in guild.text_channels if c.permissions_for(guild.me).send_messages), None
-                )
+                if vch and hasattr(vch, 'send'):
+                    st.text_channel = vch
+                else:
+                    st.text_channel = guild.system_channel or next(
+                        (c for c in guild.text_channels if c.permissions_for(guild.me).send_messages), None
+                    )
             st.voice_channel = vch
             for it in items[:200]:
                 req_id = it.get('requester_id')

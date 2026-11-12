@@ -20,6 +20,13 @@ from storage import close_storage
 def _init_opus() -> None:
     import discord
     import discord.opus
+    import discord.voice_state
+
+    # 鎖定語音連線使用標準穩定加密協定 (AEAD XChaCha20 Poly1305 RTPSIZE)，
+    # 防止 DAVE (MLS E2EE) 協商未完成導致 Discord 語音伺服器丟棄無聲音訊封包
+    with contextlib.suppress(Exception):
+        discord.voice_state.VoiceConnectionState.max_dave_protocol_version = property(lambda self: 0)
+        logger.info("🔒 語音協定已鎖定相容標準加密傳輸 (DAVE 協商已安全降級相容)")
 
     if discord.opus.is_loaded():
         return

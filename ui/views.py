@@ -171,7 +171,7 @@ class MusicControllerView(discord.ui.View):
             vstate = getattr(interaction.user, 'voice', None)
             user_voice = getattr(vstate, 'channel', None) if vstate else None
             target_ch = user_voice or getattr(vc, 'channel', None) or self.state.voice_channel
-            if isinstance(target_ch, discord.VoiceChannel):
+            if isinstance(target_ch, (discord.VoiceChannel, discord.StageChannel)):
                 vc = await safe_voice_connect(self.bot, target_ch, timeout=30.0)
         await interaction.response.defer()
         await safe_pause_resume(vc, self.state, bot=self.bot, guild=bot_guild)
@@ -433,7 +433,7 @@ class SearchSelectView(discord.ui.View):
         if state.queue_space() <= 0:
             await interaction.response.send_message(t('queue_full', interaction, max_size=MAX_QUEUE_SIZE), ephemeral=True)
             return
-        if isinstance(interaction.channel, discord.TextChannel):
+        if interaction.channel and hasattr(interaction.channel, 'send'):
             state.text_channel = interaction.channel
         state.queue.append(song)
 

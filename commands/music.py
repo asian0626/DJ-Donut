@@ -111,7 +111,7 @@ async def _resolve_bot_and_channel_for_play(
     if state.queue_space() <= 0:
         await interaction.followup.send(t('queue_full', interaction, max_size=MAX_QUEUE_SIZE))
         return None
-    if isinstance(interaction.channel, discord.TextChannel):
+    if interaction.channel and hasattr(interaction.channel, 'send'):
         state.text_channel = interaction.channel
 
     try:
@@ -992,7 +992,7 @@ async def _handle_replay(interaction: discord.Interaction, position: int = 1) ->
     new_song.duration = history_song.duration
     new_song.thumbnail = history_song.thumbnail
 
-    if isinstance(interaction.channel, discord.TextChannel):
+    if interaction.channel and hasattr(interaction.channel, 'send'):
         state.text_channel = interaction.channel
     state.queue.append(new_song)
 
@@ -1158,7 +1158,7 @@ async def _fav_play(interaction: discord.Interaction, uid: int) -> None:
     if state.queue_space() <= 0:
         await interaction.followup.send(t('queue_full', interaction, max_size=MAX_QUEUE_SIZE))
         return
-    if isinstance(interaction.channel, discord.TextChannel):
+    if interaction.channel and hasattr(interaction.channel, 'send'):
         state.text_channel = interaction.channel
     new_songs = _fav_items_to_songs(favs, state.queue_space(), interaction.user)
     state.queue.extend(new_songs)
