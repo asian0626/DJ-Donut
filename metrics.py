@@ -67,14 +67,26 @@ def timed_extraction(func: Callable[..., Any]) -> Callable[..., Any]:
 
 def _node_status(bot: Any) -> Dict[str, Any]:
     states = getattr(bot, "states", {}) or {}
-    active = [s for s in states.values() if getattr(s, "is_playing", False)]
+    active_rooms = []
+    for gid, s in states.items():
+        if getattr(s, "is_playing", False):
+            cur = getattr(s, "current", None)
+            vch = getattr(s, "voice_channel", None)
+            tch = getattr(s, "text_channel", None)
+            active_rooms.append({
+                "guild_id": gid,
+                "voice_channel": getattr(vch, "name", str(vch)) if vch else None,
+                "text_channel": getattr(tch, "name", str(tch)) if tch else None,
+                "song_title": getattr(cur, "title", None) if cur else None,
+            })
     return {
         "node_id": getattr(bot, "node_id", None),
         "name": getattr(bot, "node_name", None),
         "ready": bool(bot.is_ready()) if hasattr(bot, "is_ready") else False,
         "lavalink": bool(getattr(bot, "lavalink_connected", False)),
         "guilds": len(getattr(bot, "guilds", []) or []),
-        "active_rooms": len(active),
+        "active_rooms": len(active_rooms),
+        "rooms": active_rooms,
         "queued_songs": sum(len(getattr(s, "queue", [])) for s in states.values()),
     }
 

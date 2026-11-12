@@ -278,13 +278,17 @@ class MusicNodeBot(commands.Bot):
             tch_id = snap.get('text_channel_id')
             if tch_id:
                 st.text_channel = guild.get_channel(tch_id)
+            if not st.text_channel and guild:
+                st.text_channel = guild.system_channel or next(
+                    (c for c in guild.text_channels if c.permissions_for(guild.me).send_messages), None
+                )
             st.voice_channel = vch
             for it in items[:200]:
                 req_id = it.get('requester_id')
                 requester = (guild.get_member(req_id) if req_id else None) or guild.me or humans[0]
                 st.queue.append(Song.from_snapshot(it, requester))
             await safe_voice_connect(self, vch, timeout=20.0)
-            logger.info(f"[{self.node_name}] 🔄 已為伺服器 {guild.name} 恢復 {len(st.queue)} 首中斷前的待播歌曲")
+            logger.info(f"[{self.node_name}] 🔄 已為伺服器【{guild.name}】語音房【{vch.name}】恢復 {len(st.queue)} 首待播歌曲")
             await play_next(self, guild)
         except Exception as e:
             logger.warning(f"[{self.node_name}] 恢復隊列快照失敗 (guild={gid}): {e}")

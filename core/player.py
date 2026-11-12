@@ -102,6 +102,10 @@ async def _preload_and_lyrics_worker(bot: Any, guild: discord.Guild, state: Guil
 
 
 async def _send_clean_nowplaying(bot: Any, guild: discord.Guild, state: GuildMusicState, song: Song) -> None:
+    if not state.text_channel and guild:
+        state.text_channel = guild.system_channel or next(
+            (c for c in guild.text_channels if c.permissions_for(guild.me).send_messages), None
+        )
     if not state.text_channel:
         return
     if state.current_view:
@@ -272,6 +276,7 @@ async def _try_play_wavelink(bot: Any, guild: discord.Guild, state: GuildMusicSt
         await vc.play(song.wavelink_track)
         if hasattr(vc, 'set_volume'):
             await vc.set_volume(int(state.volume * 100))
+        logger.info(f"[{bot.node_name}] 🎶 正在播放 (Lavalink): {song.title} (伺服器: {guild.name})")
         await _send_clean_nowplaying(bot, guild, state, song)
         return True
     except Exception as e:
@@ -334,6 +339,7 @@ async def _start_native_ffmpeg_playback(bot: Any, guild: discord.Guild, state: G
                 vc.play(audio_source, after=make_after_callback(bot, guild, state))
 
         state.start_time = time.time() - seek_offset
+        logger.info(f"[{bot.node_name}] 🎶 正在播放: {song.title} (伺服器: {guild.name})")
         await _send_clean_nowplaying(bot, guild, state, song)
         return True
     except Exception as e:

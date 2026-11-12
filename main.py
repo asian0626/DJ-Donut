@@ -17,6 +17,33 @@ from metrics import start_metrics_server
 from storage import close_storage
 
 
+def _init_opus() -> None:
+    import discord
+    import discord.opus
+
+    if discord.opus.is_loaded():
+        return
+    opus_candidates = [
+        "/opt/homebrew/lib/libopus.dylib",
+        "/usr/local/lib/libopus.dylib",
+        "libopus.dylib",
+        "libopus.so.0",
+        "libopus.so",
+    ]
+    for candidate in opus_candidates:
+        with contextlib.suppress(Exception):
+            discord.opus.load_opus(candidate)
+            if discord.opus.is_loaded():
+                logger.info(f"🎧 成功載入原生 Opus 音訊庫: {candidate}")
+                return
+    with contextlib.suppress(Exception):
+        discord.opus._OpusStruct.get_opus_version()
+        if discord.opus.is_loaded():
+            logger.info("🎧 成功載入系統預設 Opus 音訊庫")
+            return
+    logger.warning("⚠️ 未能載入 libopus 音訊庫，語音編碼可能無法運作！")
+
+
 def _init_sentry() -> None:
     if not SENTRY_DSN:
         return
@@ -78,6 +105,7 @@ async def main() -> None:
     print(f"🚀 正在初始化多房間音樂機器人矩陣 v{__version__} (共檢測到 {len(TOKENS)} 隻機器人配置)...")
     print("=" * 65)
 
+    _init_opus()
     _init_sentry()
 
     loop = asyncio.get_running_loop()
