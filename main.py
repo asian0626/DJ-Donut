@@ -85,6 +85,8 @@ async def _shutdown_cluster(tasks: list, metrics_runner: object) -> None:
     for t in tasks:
         if not t.done():
             t.cancel()
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
     cleanup_fn = getattr(metrics_runner, "cleanup", None)
     if callable(cleanup_fn):
         await cleanup_fn()
@@ -128,7 +130,10 @@ async def main() -> None:
         stop_wait = asyncio.create_task(stop_event.wait())
         await asyncio.wait([*tasks, stop_wait], return_when=asyncio.FIRST_COMPLETED)
     finally:
-        await _shutdown_cluster(tasks, metrics_runner)
+        shutdown_tasks = [*tasks]
+        if "stop_wait" in locals():
+            shutdown_tasks.append(stop_wait)
+        await _shutdown_cluster(shutdown_tasks, metrics_runner)
 
 
 if __name__ == "__main__":

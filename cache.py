@@ -14,9 +14,9 @@ METADATA_TTL = 3600
 LYRICS_TTL = 3600
 AUTOCOMPLETE_TTL = 120
 
-_STREAM_CACHE: "TTLCache[str, Tuple[str, Optional[str], int]]" = TTLCache(maxsize=500, ttl=STREAM_TTL)
+_STREAM_CACHE: "TTLCache[str, Tuple[float, Tuple[str, Optional[str], int]]]" = TTLCache(maxsize=500, ttl=float("inf"))
 _STREAM_LOCK = threading.Lock()
-_METADATA_CACHE: "TTLCache[str, dict]" = TTLCache(maxsize=1000, ttl=METADATA_TTL)
+_METADATA_CACHE: "TTLCache[str, Tuple[float, dict]]" = TTLCache(maxsize=1000, ttl=float("inf"))
 _METADATA_LOCK = threading.Lock()
 _LYRICS_CACHE: "TTLCache[str, Tuple[str, str, bool]]" = TTLCache(maxsize=300, ttl=LYRICS_TTL)
 _LYRICS_LOCK = threading.Lock()
@@ -49,10 +49,11 @@ def stream_cache_key(url: str = "", title: str = "") -> str:
 
 def get_cached_stream(key: str) -> Optional[Tuple[str, Optional[str], int]]:
     with _STREAM_LOCK:
-        entry = _STREAM_CACHE.get(key)
-        if entry is None:
+        cached = _STREAM_CACHE.get(key)
+        if cached is None:
             return None
-        if is_stream_url_expired(entry[0]):
+        expires_at, entry = cached
+        if time.monotonic() >= expires_at or is_stream_url_expired(entry[0]):
             _STREAM_CACHE.pop(key, None)
             return None
         return entry
@@ -64,18 +65,33 @@ def invalidate_cached_stream(key: str) -> None:
 
 
 def set_cached_stream(key: str, stream_url: str, thumb: Optional[str], dur: int, ttl: Optional[int] = None) -> None:
+    lifetime = STREAM_TTL if ttl is None else max(0, ttl)
     with _STREAM_LOCK:
-        _STREAM_CACHE[key] = (stream_url, thumb, dur)
+        if lifetime == 0:
+            _STREAM_CACHE.pop(key, None)
+            return
+        _STREAM_CACHE[key] = (time.monotonic() + lifetime, (stream_url, thumb, dur))
 
 
 def get_cached_metadata(key: str) -> Optional[dict]:
     with _METADATA_LOCK:
-        return _METADATA_CACHE.get(key)
+        cached = _METADATA_CACHE.get(key)
+        if cached is None:
+            return None
+        expires_at, data = cached
+        if time.monotonic() >= expires_at:
+            _METADATA_CACHE.pop(key, None)
+            return None
+        return data
 
 
 def set_cached_metadata(key: str, data: dict, ttl: Optional[int] = None) -> None:
+    lifetime = METADATA_TTL if ttl is None else max(0, ttl)
     with _METADATA_LOCK:
-        _METADATA_CACHE[key] = data
+        if lifetime == 0:
+            _METADATA_CACHE.pop(key, None)
+            return
+        _METADATA_CACHE[key] = (time.monotonic() + lifetime, data)
 
 
 def get_cached_lyrics(key: str) -> Optional[Tuple[str, str, bool]]:
