@@ -14,9 +14,9 @@ METADATA_TTL = 3600
 LYRICS_TTL = 3600
 AUTOCOMPLETE_TTL = 120
 
-_STREAM_CACHE: "TTLCache[str, Tuple[float, Tuple[str, Optional[str], int]]]" = TTLCache(maxsize=500, ttl=365 * 24 * 3600)
+_STREAM_CACHE: "TTLCache[str, Tuple[float, Tuple[str, Optional[str], int]]]" = TTLCache(maxsize=500, ttl=float("inf"))
 _STREAM_LOCK = threading.Lock()
-_METADATA_CACHE: "TTLCache[str, Tuple[float, dict]]" = TTLCache(maxsize=1000, ttl=365 * 24 * 3600)
+_METADATA_CACHE: "TTLCache[str, Tuple[float, dict]]" = TTLCache(maxsize=1000, ttl=float("inf"))
 _METADATA_LOCK = threading.Lock()
 _LYRICS_CACHE: "TTLCache[str, Tuple[str, str, bool]]" = TTLCache(maxsize=300, ttl=LYRICS_TTL)
 _LYRICS_LOCK = threading.Lock()
