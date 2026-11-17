@@ -21,6 +21,13 @@ def format_duration(seconds: Optional[int], lang: str = 'zh-TW') -> str:
     secs = int(seconds) % 60
     return f"{mins:02d}:{secs:02d}"
 
+
+def get_playback_rate(state: Any) -> float:
+    """Media seconds per wall second, including an effect's inherent tempo."""
+    effect_rate = {'nightcore': 1.25, 'vaporwave': 0.85}.get(getattr(state, 'filter', 'reset'), 1.0)
+    return float(getattr(state, 'playback_speed', 1.0)) * effect_rate
+
+
 def get_ffmpeg_options(state: Any, seek_seconds: Optional[int] = None) -> dict:
     before_parts = [
         '-nostats -loglevel fatal -threads 1',
@@ -37,7 +44,13 @@ def get_ffmpeg_options(state: Any, seek_seconds: Optional[int] = None) -> dict:
         filters.append(bb)
     eq = (EQ_PRESETS.get(getattr(state, 'filter', 'reset')) or {}).get("ffmpeg")
     if eq:
+        if getattr(state, 'filter', 'reset') in ('nightcore', 'vaporwave'):
+            filters.append('aresample=48000')
         filters.append(eq)
+    speed = float(getattr(state, 'playback_speed', 1.0))
+    if speed != 1.0:
+        # atempo changes tempo while preserving pitch, independently of EQ effects.
+        filters.append(f"atempo={speed:g}")
 
     opt = f"-vn -af \"{','.join(filters)}\"" if filters else "-vn"
     return {'before_options': before, 'options': opt}

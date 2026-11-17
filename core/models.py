@@ -7,6 +7,8 @@ import time
 from typing import Any, Optional, Tuple
 
 import discord
+from utils import get_playback_rate
+from core.voice_status import VoiceChannelStatus, clear_client_voice_status, sync_voice_status
 from core.dave_patch import apply_dave_fix
 
 apply_dave_fix()
@@ -179,22 +181,29 @@ class GuildMusicState:
         self.is_playing = False
         self.bassboost: str = 'off'
         self.filter: str = 'reset'
+        self.playback_speed: float = 1.0
+        self.sing_along: bool = False
         self.active_engine: str = 'Native'
         self.autoplay: bool = False
         self.mode_247: bool = True
         self.lang: Optional[str] = None
         self.start_time: float = 0.0
+        self.playback_position: float = 0.0
+        self.playback_rate: float = 1.0
         self.paused_duration: float = 0.0
         self.pause_timestamp: float = 0.0
         self.consecutive_failures: int = 0
         self.is_seeking: bool = False
+        self.audio_control_lock = asyncio.Lock()
         self.dj_role_id: Optional[int] = None
-        self.current_view: Optional[discord.ui.View] = None
+        self.current_view: Optional[discord.ui.View | discord.ui.LayoutView] = None
         self.progress_task: Optional[asyncio.Task[Any]] = None
         self.preload_task: Optional[asyncio.Task[Any]] = None
         self. _auto_leave_task: Optional[asyncio.Task[Any]] = None
         self.nowplaying_message: Optional[discord.Message] = None
         self.voice_channel: Optional[Any] = None
+        self.voice_status = VoiceChannelStatus()
+        self.voice_generation = 0
         self.current_lyrics: Optional[Tuple[str, str, bool]] = None
         self.skip_requested: bool = False
         self.resume_attempts: int = 0
@@ -230,6 +239,11 @@ class GuildMusicState:
         self.queue.clear()
         self.current = None
         self.is_playing = False
+        self.start_time = 0.0
+        self.playback_position = 0.0
+        self.playback_rate = 1.0
+        self.playback_speed = 1.0
+        self.sing_along = False
         self.paused_duration = 0.0
         self.pause_timestamp = 0.0
         self.consecutive_failures = 0
@@ -358,44 +372,29 @@ async def _reanchor_paused_stream(vc: Any, state: 'GuildMusicState', bot: Any, g
     current_song = state.current
     if not current_song:
         return False
-    buffered_source: Optional[BufferedAudioSource] = None
     try:
         state.is_seeking = True
         current_sec = get_playback_elapsed(state)
         invalidate_cached_stream(stream_cache_key(current_song.url, current_song.title))
-        from platforms.youtube import extract_stream_url_sync
-        song_url, song_title = current_song.url, current_song.title
-        fresh_url, _, _ = await run_media(lambda u=song_url, t=song_title: extract_stream_url_sync(u, t))
-        stream_url = fresh_url or getattr(current_song, 'stream_url', '')
-        if not stream_url:
-            state.is_seeking = False
+        stream_url = await _resolve_playback_stream(current_song, force=True)
+        if not stream_url or state.current is not current_song:
             return False
         current_song.stream_url = stream_url
-        await safe_stop(vc)
         if not is_vc_connected(vc):
-            target_ch = getattr(vc, 'channel', None)
+            target_ch = getattr(vc, 'channel', None) or state.voice_channel
             if target_ch:
                 vc = await safe_voice_connect(bot, target_ch)
-        ffmpeg_opts = get_ffmpeg_options(state, seek_seconds=current_sec)
-        source = discord.FFmpegPCMAudio(stream_url, **ffmpeg_opts)
-        buffered_source = BufferedAudioSource(source, prefetch_frames=50, max_frames=500)
-        audio_source = discord.PCMVolumeTransformer(buffered_source, volume=state.volume)
-        apply_encoder_bitrate(vc)
-        vc.play(audio_source, after=make_after_callback(bot, guild, state))
-        state.start_time = time.time() - current_sec
-        state.paused_duration = 0.0
-        state.pause_timestamp = 0.0
-        state.is_seeking = False
-        return True
+        if state.current is not current_song:
+            return False
+        return await hot_swap_current_stream(bot, guild, vc, state, position=current_sec, paused=False)
     except Exception as e:
         logger.error(f"[Resume Reanchor Error] {e}")
-        state.is_seeking = False
-        if buffered_source:
-            buffered_source.cleanup()
         return False
+    finally:
+        state.is_seeking = False
 
 
-async def safe_pause_resume(vc: Any, state: Optional['GuildMusicState'] = None, bot: Optional[Any] = None, guild: Optional[discord.Guild] = None) -> str:
+async def _toggle_player_pause(vc: Any, state: Optional['GuildMusicState'] = None, bot: Optional[Any] = None, guild: Optional[discord.Guild] = None) -> str:
     if not vc:
         return "none"
     bot = bot or getattr(vc, 'client', None)
@@ -426,6 +425,13 @@ async def safe_pause_resume(vc: Any, state: Optional['GuildMusicState'] = None, 
             state.pause_timestamp = time.time()
         return "paused"
     return "none"
+
+
+async def safe_pause_resume(vc: Any, state: Optional['GuildMusicState'] = None, bot: Optional[Any] = None, guild: Optional[discord.Guild] = None) -> str:
+    result = await _toggle_player_pause(vc, state, bot, guild)
+    if state is not None and result in ('paused', 'resumed'):
+        await sync_voice_status(state, getattr(vc, 'channel', None))
+    return result
 
 
 async def safe_stop(vc: Any) -> None:
@@ -482,6 +488,7 @@ def _prune_client_voice_tracking(vc: Any) -> None:
 async def safe_disconnect(vc: Any) -> None:
     if not vc:
         return
+    await clear_client_voice_status(vc)
     try:
         await safe_stop(vc)
     except Exception:
@@ -555,51 +562,60 @@ async def safe_voice_connect(bot: Any, voice_channel: Any, timeout: float = 30.0
         raise
 
 
-async def hot_swap_current_stream(bot: Any, guild: Optional[discord.Guild], vc: Any, state: GuildMusicState) -> bool:
+async def _resolve_playback_stream(song: Song, *, force: bool = False) -> str:
+    stream_url = song.stream_url
+    if force or not stream_url or is_stream_url_expired(stream_url):
+        from platforms.youtube import extract_stream_url_sync
+        fresh_url, _, _ = await run_media(lambda: extract_stream_url_sync(song.url, song.title))
+        stream_url = fresh_url or stream_url
+    return stream_url
+
+
+async def _refresh_after_hot_swap(bot: Any, state: GuildMusicState) -> None:
+    if state.nowplaying_message:
+        try:
+            from ui.views import refresh_nowplaying_message
+            await refresh_nowplaying_message(bot, state)
+        except Exception:
+            logger.debug("Ignored exception in hot_swap_current_stream", exc_info=True)
+
+
+async def hot_swap_current_stream(
+    bot: Any, guild: Optional[discord.Guild], vc: Any, state: GuildMusicState,
+    *, position: Optional[int] = None, paused: Optional[bool] = None,
+) -> bool:
     current_song = state.current
-    if not vc or not guild or not current_song or not (is_vc_playing(vc) or is_vc_paused(vc)):
+    if not vc or not guild or not current_song or not (state.is_playing or is_vc_active(vc)):
         return False
     buffered_source: Optional[BufferedAudioSource] = None
     try:
         state.is_seeking = True
-        current_sec = get_playback_elapsed(state)
-        was_paused = is_vc_paused(vc) or (state.pause_timestamp > 0)
-        stream_url = getattr(current_song, 'stream_url', '')
-        if not stream_url or is_stream_url_expired(stream_url):
-            from platforms.youtube import extract_stream_url_sync
-            song_url, song_title = current_song.url, current_song.title
-            fresh_url, _, _ = await run_media(lambda u=song_url, t=song_title: extract_stream_url_sync(u, t))
-            stream_url = fresh_url or stream_url
-        if not stream_url:
+        current_sec = get_playback_elapsed(state) if position is None else position
+        was_paused = (is_vc_paused(vc) or state.pause_timestamp > 0) if paused is None else paused
+        stream_url = await _resolve_playback_stream(current_song)
+        if not stream_url or state.current is not current_song:
             state.is_seeking = False
             return False
         current_song.stream_url = stream_url
-        await safe_stop(vc)
-        ffmpeg_opts = get_ffmpeg_options(state, seek_seconds=current_sec)
+        ffmpeg_opts = get_ffmpeg_options(state, seek_seconds=current_sec if current_song.duration > 0 else None)
         source = discord.FFmpegPCMAudio(stream_url, **ffmpeg_opts)
         buffered_source = BufferedAudioSource(source, prefetch_frames=50, max_frames=500)
         audio_source = discord.PCMVolumeTransformer(buffered_source, volume=state.volume)
 
         apply_encoder_bitrate(vc)
         after_callback = make_after_callback(bot, guild, state)
+        await safe_stop(vc)
+        if state.current is not current_song:
+            audio_source.cleanup()
+            state.is_seeking = False
+            return False
         vc.play(audio_source, after=after_callback)
-        now = time.time()
-        state.start_time = now - current_sec
-        state.paused_duration = 0.0
         if was_paused:
             vc.pause()
-            state.pause_timestamp = now
-        else:
-            state.pause_timestamp = 0.0
+        set_playback_position(state, current_sec, paused=was_paused)
         state.is_seeking = False
-        state.last_active = now
-        if state.nowplaying_message:
-            try:
-                from ui.embeds import build_nowplaying_embed
-                embed = build_nowplaying_embed(bot, current_song, state)
-                await state.nowplaying_message.edit(embed=embed)
-            except Exception:
-                logger.debug("Ignored exception in hot_swap_current_stream", exc_info=True)
+        state.last_active = time.time()
+        await _refresh_after_hot_swap(bot, state)
         return True
     except Exception as e:
         logger.error(f"[HotSwap Error] {e}")
@@ -630,9 +646,21 @@ def has_dj_permission(interaction: discord.Interaction, state: 'GuildMusicState'
     return False
 
 
+def set_playback_position(state: GuildMusicState, media_seconds: float, *, paused: bool = False) -> None:
+    """Anchor the media clock after a seek, restart, or change of playback rate."""
+    now = time.time()
+    state.playback_position = max(0.0, float(media_seconds))
+    state.playback_rate = get_playback_rate(state)
+    state.start_time = now
+    state.paused_duration = 0.0
+    state.pause_timestamp = now if paused else 0.0
+
+
 def get_playback_elapsed(state: GuildMusicState) -> int:
     if not state.current or state.start_time == 0:
         return 0
     now = time.time()
     base = state.pause_timestamp if state.pause_timestamp > 0 else now
-    return max(0, int(base - state.start_time - state.paused_duration))
+    wall_elapsed = max(0.0, base - state.start_time - state.paused_duration)
+    media_seconds = state.playback_position + wall_elapsed * state.playback_rate
+    return max(0, int(media_seconds))
