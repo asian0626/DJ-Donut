@@ -5,7 +5,7 @@
 [![English](https://img.shields.io/badge/Language-English-blue?style=flat-square)](README.md)
 [![繁體中文](https://img.shields.io/badge/語言-繁體中文-red?style=flat-square)](README_zh-TW.md)
 
-![Version](https://img.shields.io/badge/Version-v1.7.1-blue?logo=git)
+![Version](https://img.shields.io/badge/Version-v2.0.0-blue?logo=git)
 ![Python](https://img.shields.io/badge/Python-3.10%20%7C%203.11%20%7C%203.12-3776AB?logo=python&logoColor=white)
 ![Discord.py](https://img.shields.io/badge/Discord.py-v2.7.0%2B-5865F2?logo=discord&logoColor=white)
 ![Lavalink](https://img.shields.io/badge/Lavalink-v4.0%2B-FF3366?logo=audacity&logoColor=white)
@@ -16,7 +16,7 @@
 **A lightweight, multi-room Discord music bot cluster.**  
 Run 1 to 5 bot instances inside a single Python process to stream music into multiple voice channels simultaneously, each with independent queues and audio controls.
 
-[Bot Invitations](#bot-invitations) • [Features](#features) • [Slash Commands](#slash-commands) • [Quick Start](#quick-start) • [Audio Tips](#audio-troubleshooting) • [Changelog](#changelog) • [Feedback](#support--feedback)
+[Bot Invitations](#bot-invitations) • [Features](#features) • [Player Interface](#player-interface) • [Slash Commands](#slash-commands) • [Quick Start](#quick-start) • [Audio Tips](#audio-troubleshooting) • [Changelog](#changelog) • [Feedback](#support--feedback)
 
 </div>
 
@@ -48,13 +48,23 @@ You can invite the pre-hosted **DJ Donut** cluster directly to your server:
 - **Multi-Platform Support**: Paste links directly from YouTube, SoundCloud, Spotify (tracks, albums, playlists), Apple Music, and NetEase Cloud Music (including `163cn.tv` shortlinks).
 - **Smooth Audio Streaming**: Decouples audio decoding from Discord voice transmission using a 5-second ring buffer to prevent playback jitter, sudden fast-forwarding, or audio dropouts.
 - **Full Queue & Playback Control**: Jump to specific timestamps with `/seek`, randomize the queue with `/shuffle`, drop unwanted tracks with `/remove`, or wipe the list with `/clear`.
-- **Interactive Controller UI**: Real-time progress bar (`01:23 ━━━━━━🔘─────── 04:29`), platform-themed embed cards, and a 10-button controller for volume adjustments, seeking, looping, and lyrics.
-- **Synchronized Lyrics**: Fetch synchronized or plain-text lyrics on the fly via LRCLIB and NetEase without needing third-party API keys.
+- **Components V2 Player**: One compact card with track artwork, playback progress, requester and room details, five main buttons, and an 11-option control menu for volume, repeat, seeking, queue, autoplay, EQ, speed, Sing Along, lyrics, and stop.
+- **Playback Speed & Live Audio Controls**: Choose seven speeds from 0.5× to 2.0× while preserving pitch, adjust volume from 0–200%, and apply EQ on either the native FFmpeg or Lavalink engine.
+- **Synchronized Lyrics & Sing Along**: Fetch synchronized or plain-text lyrics via LRCLIB and NetEase without third-party API keys. Enable Sing Along to show timed lyric excerpts directly on the player.
+- **Voice Channel Song Status**: Automatically show the current song or paused state in the connected voice channel's status, and clear it when playback ends or the bot leaves. Requires Set Voice Channel Status permission; standard voice channels only.
 - **Server Settings Persistence**: Volume levels, language preferences, 24/7 mode, bass boost, and audio filters are persisted in a non-blocking SQLite (WAL) database (`data/donut.db`, with automatic migration from legacy `guild_settings.json`), alongside active playback queue snapshots for seamless restart recovery.
 - **Smart Autoplay (Last.fm + YouTube)**: Enable `/autoplay` to keep the music playing with Last.fm `track.getSimilar` recommendations (when `LASTFM_API_KEY` is set) and cleaned-title YouTube fallback.
 - **Observability Endpoints**: Built-in HTTP server exposing `/healthz`, `/metrics` (Prometheus), and `/status` (JSON) on `127.0.0.1:8080`.
 - **Multilingual Support**: Supports English, Traditional Chinese, Simplified Chinese, Japanese, Korean, and Spanish. Automatically detects each user's client locale.
 - **Lightweight Footprint**: Typically runs within 80–120 MB RAM even with all 5 nodes active.
+
+---
+
+## Player Interface
+
+DJ Donut 2.0.0 uses Discord Components V2 for the player shown by `/play` and `/nowplaying`. The main row provides shuffle, replay, pause/resume, skip, and favorite. The menu provides volume, repeat, rewind 15 seconds, forward 15 seconds, queue, autoplay, EQ, speed, Sing Along, lyrics, and stop.
+
+Read the [English player and upgrade guide](docs/player-interface.en.md), [繁體中文指南](docs/player-interface.md), and [v2.0.0 release notes](docs/releases/v2.0.0.md). The guide covers voice status permissions, playback speed and session defaults, and Discord theme and progress-bar limits. Existing installations need no new environment variables or dependencies.
 
 ---
 
@@ -67,7 +77,7 @@ You can invite the pre-hosted **DJ Donut** cluster directly to your server:
 | **/search** | `query` | Search tracks and pick from an interactive top-5 select menu |
 | **/pause** | *None* | Pause the currently playing track in your voice room |
 | **/resume** | *None* | Resume paused playback with automatic stream re-anchoring |
-| **/seek** | `time` | Fast-forward or jump to a timestamp (e.g. `90` or `01:30`) |
+| **/seek** | `time` | Jump to a timestamp (e.g. `90` or `01:30`); preserves pause and playback speed |
 | **/move** | `from`, `to` | Move a queued track to a new position |
 | **/replay** | `[index]` | Replay a track from playback history |
 | **/shuffle** | *None* | Randomly shuffle all upcoming songs in the queue |
@@ -75,7 +85,7 @@ You can invite the pre-hosted **DJ Donut** cluster directly to your server:
 | **/clear** | *None* | Clear all upcoming songs from the queue |
 | **/history** | *None* | View the last 15 songs played in this room |
 | **/favorite** | `action`, `[index]` | Manage personal favorite tracks (`play`, `list`, `add`, `remove`, `clear`) |
-| **/nowplaying**| *None* | Show track details, synced karaoke lyrics, progress bar, and controller |
+| **/nowplaying**| *None* | Show the Components V2 card with five buttons and the full 11-option control menu |
 | **/queue** | *None* | Browse the upcoming track queue with interactive pagination |
 | **/skip** | *None* | Skip the track currently playing in your room (DJ guarded) |
 | **/stop** | `[force_all]` | Stop playback and disconnect the bot (or stop all bots) |
@@ -83,7 +93,7 @@ You can invite the pre-hosted **DJ Donut** cluster directly to your server:
 | **/autoplay** | *None* | Toggle smart autoplay radio mode when queue ends |
 | **/lyrics** | `[song]` | Look up synced or plain lyrics for current or queried track |
 | **/bassboost** | `level` | Live-adjust bass boost (`+4dB` to `+20dB`) with instant stream hot-swap |
-| **/filter** | `preset` | Live-apply audio filters (Rock, Pop, Vocal, Nightcore, 8D, etc.) |
+| **/filter** | `preset` | Live-apply audio filters (Rock, Pop, Vocal, Nightcore, 8D, etc.); also available through the player's EQ menu |
 | **/bitrate** | `[kbps]` | Maximize the voice channel bitrate up to 384kbps |
 | **/status** | *None* | Live cluster dashboard for all 5 bot nodes |
 | **/247** | *None* | Toggle 24/7 permanent room presence |
@@ -223,6 +233,8 @@ discord-music-bot/
 ├── core/
 │   ├── models.py        # Song, GuildMusicState & BufferedAudioSource
 │   ├── player.py        # Audio pipeline playback engine & play_next loop
+│   ├── audio_controls.py # Shared seek, volume, EQ & speed controls
+│   ├── voice_status.py  # Current-song voice channel status lifecycle
 │   ├── dispatcher.py    # Voice channel matching & smart multi-bot routing
 │   └── node.py          # MusicNodeBot client definition & cluster lifecycle
 ├── platforms/
@@ -231,8 +243,9 @@ discord-music-bot/
 │   ├── netease.py       # NetEase song, album & playlist resolver
 │   └── apple_music.py   # Apple Music metadata and album art scraper
 ├── ui/
-│   ├── embeds.py        # Embed cards, progress bar & duration formatters
-│   └── views.py         # Dynamic 10-button music controller & select menus
+│   ├── embeds.py        # Queue and queued-song embeds
+│   ├── player_card.py   # Components V2 card, progress & Sing Along display
+│   └── views.py         # Five-button controller, 11-option menu & settings panels
 ├── commands/
 │   ├── music.py         # /play, /search, /skip, /stop, /queue, /move
 │   ├── audio.py         # /seek, /bassboost, /filter, /bitrate, /engine
@@ -244,6 +257,13 @@ discord-music-bot/
 ---
 
 ## Changelog
+
+### v2.0.0 (2026-11-17)
+
+- **Components V2 Player**: Replaced the Embed controller with a compact card, five main buttons, and the full 11-option menu. Added volume input, ±15-second seeking, and EQ and speed pickers while keeping existing slash commands.
+- **Playback Speed & Sing Along**: Added seven pitch-preserving speeds from 0.5× to 2.0× and an optional synchronized lyric excerpt on the card. Native FFmpeg and Lavalink controls preserve playback position and pause state; speed and Sing Along reset when the room session ends or the bot restarts.
+- **Automatic Voice Channel Status**: Show the current or paused song in standard voice channel status and clear it after playback, moves, disconnects, or normal shutdown. Missing status permission does not interrupt audio.
+- **Upgrade Guides**: Added English and Traditional Chinese player documentation, permission guidance, and [release notes](docs/releases/v2.0.0.md). No new environment variables or dependencies are required.
 
 ### v1.7.1 (2026-11-11)
 - **Audio Pipeline Hardening (-threads 1 & Silence Starvation Protection)**: Enforced `-threads 1` in `utils.py:get_ffmpeg_options()` to prevent multi-bot FFmpeg decoding spikes on multi-core servers. Added buffer starvation protection in `BufferedAudioSource` (auto-terminates stalled/dropped streams after 300 empty frames / 6 seconds instead of playing silent audio endlessly).

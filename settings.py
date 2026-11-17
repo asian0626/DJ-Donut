@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-__version__ = "1.7.1"
+__version__ = "2.0.0"
 
 logging.basicConfig(
     level=logging.INFO,
