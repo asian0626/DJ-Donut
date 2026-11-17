@@ -56,11 +56,10 @@ async def _resolve_seek_stream(state: GuildMusicState) -> Optional[str]:
 async def _refresh_nowplaying_after_seek(b: MusicNodeBot, state: GuildMusicState) -> None:
     if state.nowplaying_message and state.current:
         try:
-            from ui.embeds import build_nowplaying_embed
-            embed = build_nowplaying_embed(b, state.current, state)
-            await state.nowplaying_message.edit(embed=embed)
+            from ui.views import refresh_nowplaying_message
+            await refresh_nowplaying_message(b, state)
         except Exception:
-            logger.debug("Failed to update nowplaying embed after seek", exc_info=True)
+            logger.debug("Failed to update nowplaying card after seek", exc_info=True)
 
 
 async def _seek_native_ffmpeg(
@@ -199,12 +198,10 @@ async def _handle_pause(interaction: discord.Interaction) -> None:
         await interaction.response.send_message(t('paused', interaction, bot_name=b.node_name), ephemeral=True)
         return
 
+    await interaction.response.defer()
     await safe_pause_resume(vc, state, bot=b, guild=bot_guild)
-    if state.current_view:
-        updater = getattr(state.current_view, "_update_button_states", None)
-        if callable(updater):
-            updater()
-    await interaction.response.send_message(t('paused', interaction, bot_name=b.node_name))
+    await _refresh_nowplaying_after_seek(b, state)
+    await interaction.followup.send(t('paused', interaction, bot_name=b.node_name))
 
 
 async def _handle_resume(interaction: discord.Interaction) -> None:
@@ -248,10 +245,7 @@ async def _handle_resume(interaction: discord.Interaction) -> None:
 
     await interaction.response.defer()
     await safe_pause_resume(vc, state, bot=b, guild=bot_guild)
-    if state.current_view:
-        updater = getattr(state.current_view, "_update_button_states", None)
-        if callable(updater):
-            updater()
+    await _refresh_nowplaying_after_seek(b, state)
     await interaction.followup.send(t('resumed', interaction, bot_name=b.node_name))
 
 

@@ -189,7 +189,7 @@ class GuildMusicState:
         self.consecutive_failures: int = 0
         self.is_seeking: bool = False
         self.dj_role_id: Optional[int] = None
-        self.current_view: Optional[discord.ui.View] = None
+        self.current_view: Optional[discord.ui.View | discord.ui.LayoutView] = None
         self.progress_task: Optional[asyncio.Task[Any]] = None
         self.preload_task: Optional[asyncio.Task[Any]] = None
         self. _auto_leave_task: Optional[asyncio.Task[Any]] = None
@@ -595,9 +595,8 @@ async def hot_swap_current_stream(bot: Any, guild: Optional[discord.Guild], vc: 
         state.last_active = now
         if state.nowplaying_message:
             try:
-                from ui.embeds import build_nowplaying_embed
-                embed = build_nowplaying_embed(bot, current_song, state)
-                await state.nowplaying_message.edit(embed=embed)
+                from ui.views import refresh_nowplaying_message
+                await refresh_nowplaying_message(bot, state)
             except Exception:
                 logger.debug("Ignored exception in hot_swap_current_stream", exc_info=True)
         return True

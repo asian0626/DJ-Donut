@@ -46,7 +46,6 @@ from platforms.spotify import resolve_spotify
 from platforms.netease import resolve_netease
 from platforms.apple_music import resolve_apple_music
 from ui.embeds import (
-    build_nowplaying_embed,
     build_queue_embed,
     build_song_queued_embed,
     format_duration,
@@ -842,21 +841,21 @@ async def _handle_nowplaying(interaction: discord.Interaction) -> None:
         await interaction.response.send_message(t('not_playing', interaction), ephemeral=True)
         return
 
-    embed = build_nowplaying_embed(b, state.current, state, lang=resolve_locale(interaction))
     if state.current_view:
         try:
             state.current_view.stop()
         except Exception:
             logger.debug("Ignored exception in slash_nowplaying", exc_info=True)
     old_msg = state.nowplaying_message
+    state.nowplaying_message = None
     if old_msg:
         try:
             await old_msg.delete()
         except Exception:
             logger.debug("Ignored exception in slash_nowplaying", exc_info=True)
-    view = MusicControllerView(b, state)
+    view = MusicControllerView(b, state, lang=resolve_locale(interaction))
     state.current_view = view
-    await interaction.response.send_message(embed=embed, view=view)
+    await interaction.response.send_message(view=view)
     try:
         state.nowplaying_message = await interaction.original_response()
     except Exception:

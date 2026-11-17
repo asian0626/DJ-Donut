@@ -27,7 +27,8 @@ from core.models import (
 )
 from i18n import resolve_locale, t
 from lyrics import format_clean_lyrics, get_lyrics_async
-from ui.embeds import build_nowplaying_embed, build_queue_embed
+from ui.embeds import build_queue_embed
+from ui.player_card import build_player_card
 
 if TYPE_CHECKING:
     from core.node import MusicNodeBot
@@ -107,47 +108,105 @@ class QueuePaginationView(discord.ui.View):
         await self._refresh_page(interaction)
 
 
-class MusicControllerView(discord.ui.View):
-    def __init__(self, bot: 'MusicNodeBot', state: GuildMusicState):
+class _MusicButton(discord.ui.Button['MusicControllerView']):
+    def __init__(self, controller: 'MusicControllerView', action: str, emoji: str):
+        super().__init__(emoji=emoji, style=discord.ButtonStyle.secondary, custom_id=f"music_{action}")
+        self.action = action
+        self.controller = controller
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        await getattr(self.controller, self.action)(interaction)
+
+
+class _MusicControlSelect(discord.ui.Select['MusicControllerView']):
+    def __init__(self, controller: 'MusicControllerView', **kwargs: Any):
+        super().__init__(**kwargs)
+        self.controller = controller
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        await self.controller.on_control(interaction, self.values[0])
+
+
+class MusicControllerView(discord.ui.LayoutView):
+    def __init__(self, bot: 'MusicNodeBot', state: GuildMusicState, lang: Optional[str] = None):
         super().__init__(timeout=None)
         self.bot = bot
         self.state = state
+        self.lang = lang or resolve_locale(guild_id=state.guild_id)
         self._update_button_states()
 
     def _update_button_states(self) -> None:
-        is_paused = (self.state.pause_timestamp > 0)
-        for child in self.children:
-            if isinstance(child, discord.ui.Button):
-                if child.custom_id == "music_play_pause":
-                    if is_paused:
-                        child.emoji = "▶️"
-                        child.style = discord.ButtonStyle.secondary
-                    else:
-                        child.emoji = "⏸️"
-                        child.style = discord.ButtonStyle.primary
-                elif child.custom_id == "music_loop":
-                    if self.state.loop_mode == 'single':
-                        child.emoji = "🔂"
-                        child.label = "單曲"
-                        child.style = discord.ButtonStyle.success
-                    elif self.state.loop_mode == 'queue':
-                        child.emoji = "🔁"
-                        child.label = "歌單"
-                        child.style = discord.ButtonStyle.primary
-                    else:
-                        child.emoji = "🔁"
-                        child.label = "循環"
-                        child.style = discord.ButtonStyle.secondary
-                elif child.custom_id == "music_autoplay":
-                    child.style = discord.ButtonStyle.success if self.state.autoplay else discord.ButtonStyle.secondary
+        self.clear_items()
+        paused = self.state.pause_timestamp > 0
+        controls = discord.ui.ActionRow(
+            _MusicButton(self, 'shuffle_btn', '🔀'),
+            _MusicButton(self, 'replay', '⏮️'),
+            _MusicButton(self, 'play_pause', '▶️' if paused else '⏸️'),
+            _MusicButton(self, 'skip', '⏭️'),
+            _MusicButton(self, 'fav_add', '➕'),
+        )
+        actions = (
+            ('view_queue', 'queue', '📜'),
+            ('view_lyrics', 'lyrics', '💬'),
+            ('toggle_loop', 'loop', '🔁'),
+            ('volume_down', 'volume_down', '🔉'),
+            ('volume_up', 'volume_up', '🔊'),
+            ('toggle_autoplay', 'autoplay', '📻'),
+            ('fav_play', 'favorites', '⭐'),
+            ('stop_btn', 'stop', '⏹️'),
+        )
+        descriptions = {
+            'toggle_loop': t(f'loop_{self.state.loop_mode}', lang=self.lang),
+            'volume_down': f'{int(self.state.volume * 100)}%',
+            'volume_up': f'{int(self.state.volume * 100)}%',
+            'toggle_autoplay': '✅' if self.state.autoplay else '❌',
+        }
+        options = [discord.SelectOption(label=t(f'player_{key}', lang=self.lang), value=action, emoji=emoji,
+                                        description=descriptions.get(action)) for action, key, emoji in actions]
+        menu = discord.ui.ActionRow(_MusicControlSelect(self,
+            custom_id='music_controls', placeholder=t('player_select_control', lang=self.lang),
+            min_values=1, max_values=1, options=options,
+        ))
+        self.add_item(build_player_card(self.bot, self.state, controls, menu, lang=self.lang))
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if not self.state.current or (self.state.current_view is not None and self.state.current_view is not self):
+            await interaction.response.send_message(t('not_playing', interaction), ephemeral=True)
+            return False
+        return True
+
+    def _disable_controls(self) -> None:
+        for item in self.walk_children():
+            if isinstance(item, (discord.ui.Button, discord.ui.Select)):
+                item.disabled = True
+
+    async def _refresh_interaction(self, interaction: discord.Interaction, *, deferred: bool = False) -> None:
+        self._update_button_states()
+        if deferred:
+            await interaction.edit_original_response(content=None, embeds=[], view=self)
+        else:
+            await interaction.response.edit_message(content=None, embeds=[], view=self)
+
+    async def on_control(self, interaction: discord.Interaction, action: str) -> None:
+        actions = {
+            'view_queue': self.view_queue, 'view_lyrics': self.view_lyrics,
+            'toggle_loop': self.toggle_loop, 'volume_down': self.volume_down,
+            'volume_up': self.volume_up, 'toggle_autoplay': self.toggle_autoplay,
+            'fav_play': self.fav_play, 'stop_btn': self.stop_btn,
+        }
+        handler = actions.get(action)
+        if handler is not None:
+            await handler(interaction)
 
     def _get_vc(self, interaction: discord.Interaction) -> Any:
         gid = interaction.guild_id or self.state.guild_id
         bot_guild = self.bot.get_guild(gid) or interaction.guild
         return (bot_guild.voice_client if bot_guild else None) or discord.utils.get(getattr(self.bot, 'voice_clients', []), guild__id=gid)
 
-    @discord.ui.button(emoji="⏮️", style=discord.ButtonStyle.secondary, row=0, custom_id="music_replay")
-    async def replay(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def replay(self, interaction: discord.Interaction):
+        if not has_dj_permission(interaction, self.state):
+            await interaction.response.send_message(t('dj_permission_denied', interaction, role_id=self.state.dj_role_id), ephemeral=True)
+            return
         vc = self._get_vc(interaction)
         if not vc or not self.state.current:
             await interaction.response.send_message(t('not_playing', interaction), ephemeral=True)
@@ -158,8 +217,7 @@ class MusicControllerView(discord.ui.View):
         await safe_stop(vc)
         await interaction.response.send_message("⏮️ 重播當前歌曲！", ephemeral=True)
 
-    @discord.ui.button(emoji="⏯️", style=discord.ButtonStyle.primary, row=0, custom_id="music_play_pause")
-    async def play_pause(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def play_pause(self, interaction: discord.Interaction):
         gid = interaction.guild_id or self.state.guild_id
         bot_guild = self.bot.get_guild(gid) or interaction.guild
         vc = self._get_vc(interaction)
@@ -167,23 +225,20 @@ class MusicControllerView(discord.ui.View):
             await interaction.response.send_message(t('no_bot_in_room', interaction), ephemeral=True)
             return
         self.state.last_active = time.time()
+        await interaction.response.defer()
         if not is_vc_connected(vc):
             vstate = getattr(interaction.user, 'voice', None)
             user_voice = getattr(vstate, 'channel', None) if vstate else None
             target_ch = user_voice or getattr(vc, 'channel', None) or self.state.voice_channel
             if isinstance(target_ch, (discord.VoiceChannel, discord.StageChannel)):
                 vc = await safe_voice_connect(self.bot, target_ch, timeout=30.0)
-        await interaction.response.defer()
         await safe_pause_resume(vc, self.state, bot=self.bot, guild=bot_guild)
-        self._update_button_states()
-        embed = build_nowplaying_embed(self.bot, self.state.current, self.state, lang=resolve_locale(interaction))
         try:
-            await interaction.edit_original_response(embed=embed, view=self)
+            await self._refresh_interaction(interaction, deferred=True)
         except Exception:
             logger.debug("Ignored exception in play_pause", exc_info=True)
 
-    @discord.ui.button(emoji="⏭️", style=discord.ButtonStyle.secondary, row=0, custom_id="music_skip")
-    async def skip(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def skip(self, interaction: discord.Interaction):
         if not has_dj_permission(interaction, self.state):
             await interaction.response.send_message(t('dj_permission_denied', interaction, role_id=self.state.dj_role_id), ephemeral=True)
             return
@@ -199,32 +254,29 @@ class MusicControllerView(discord.ui.View):
         await safe_stop(vc)
         await interaction.response.send_message(t('skipped', interaction, bot_name=self.bot.node_name))
 
-    @discord.ui.button(emoji="🔁", label="循環", style=discord.ButtonStyle.secondary, row=0, custom_id="music_loop")
-    async def toggle_loop(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def toggle_loop(self, interaction: discord.Interaction):
         self.state.last_active = time.time()
         modes = ['off', 'single', 'queue']
         idx = modes.index(self.state.loop_mode)
         self.state.loop_mode = modes[(idx + 1) % len(modes)]
-        self._update_button_states()
-        embed = build_nowplaying_embed(self.bot, self.state.current, self.state, lang=resolve_locale(interaction))
-        await interaction.response.edit_message(embed=embed, view=self)
+        await self._refresh_interaction(interaction)
 
-    @discord.ui.button(emoji="⏹️", style=discord.ButtonStyle.danger, row=0, custom_id="music_stop")
-    async def stop_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def stop_btn(self, interaction: discord.Interaction):
         if not has_dj_permission(interaction, self.state):
             await interaction.response.send_message(t('dj_permission_denied', interaction, role_id=self.state.dj_role_id), ephemeral=True)
             return
         vc = self._get_vc(interaction)
         self.state.last_active = time.time()
         self.state.skip_requested = True
+        self._disable_controls()
+        await interaction.response.edit_message(view=self)
         self.state.cleanup()
         await safe_stop(vc)
         await safe_disconnect(vc)
         self.stop()
-        await interaction.response.send_message(t('stopped_and_left', interaction, bot_name=self.bot.node_name))
+        await interaction.followup.send(t('stopped_and_left', interaction, bot_name=self.bot.node_name), ephemeral=True)
 
-    @discord.ui.button(label="-10%", emoji="🔉", style=discord.ButtonStyle.secondary, row=1, custom_id="music_vol_down")
-    async def volume_down(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def volume_down(self, interaction: discord.Interaction):
         vc = self._get_vc(interaction)
         if not vc:
             await interaction.response.send_message(t('not_playing', interaction), ephemeral=True)
@@ -234,11 +286,9 @@ class MusicControllerView(discord.ui.View):
         save_guild_setting(self.state.guild_id, "volume", self.state.volume)
         if hasattr(vc, 'source') and hasattr(vc.source, 'volume'):
             vc.source.volume = self.state.volume
-        embed = build_nowplaying_embed(self.bot, self.state.current, self.state, lang=resolve_locale(interaction))
-        await interaction.response.edit_message(embed=embed, view=self)
+        await self._refresh_interaction(interaction)
 
-    @discord.ui.button(label="+10%", emoji="🔊", style=discord.ButtonStyle.secondary, row=1, custom_id="music_vol_up")
-    async def volume_up(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def volume_up(self, interaction: discord.Interaction):
         vc = self._get_vc(interaction)
         if not vc:
             await interaction.response.send_message(t('not_playing', interaction), ephemeral=True)
@@ -248,19 +298,14 @@ class MusicControllerView(discord.ui.View):
         save_guild_setting(self.state.guild_id, "volume", self.state.volume)
         if hasattr(vc, 'source') and hasattr(vc.source, 'volume'):
             vc.source.volume = self.state.volume
-        embed = build_nowplaying_embed(self.bot, self.state.current, self.state, lang=resolve_locale(interaction))
-        await interaction.response.edit_message(embed=embed, view=self)
+        await self._refresh_interaction(interaction)
 
-    @discord.ui.button(label="接歌", emoji="📻", style=discord.ButtonStyle.secondary, row=1, custom_id="music_autoplay")
-    async def toggle_autoplay(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def toggle_autoplay(self, interaction: discord.Interaction):
         self.state.autoplay = not self.state.autoplay
         save_guild_setting(self.state.guild_id, "autoplay", self.state.autoplay)
-        self._update_button_states()
-        embed = build_nowplaying_embed(self.bot, self.state.current, self.state, lang=resolve_locale(interaction))
-        await interaction.response.edit_message(embed=embed, view=self)
+        await self._refresh_interaction(interaction)
 
-    @discord.ui.button(label="歌詞", emoji="💬", style=discord.ButtonStyle.secondary, row=1, custom_id="music_lyrics")
-    async def view_lyrics(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def view_lyrics(self, interaction: discord.Interaction):
         if not self.state.current:
             await interaction.response.send_message(t('not_playing', interaction), ephemeral=True)
             return
@@ -286,8 +331,7 @@ class MusicControllerView(discord.ui.View):
         embed.set_footer(text=f"模式: {sync_str} • 資料庫: LRCLIB / Netease")
         await interaction.followup.send(embed=embed, ephemeral=True)
 
-    @discord.ui.button(label="隊列", emoji="📜", style=discord.ButtonStyle.secondary, row=1, custom_id="music_queue")
-    async def view_queue(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def view_queue(self, interaction: discord.Interaction):
         lang = resolve_locale(interaction)
         embed = build_queue_embed(self.bot, self.state, lang=lang, page=1)
         view = QueuePaginationView(self.bot, self.state, lang=lang)
@@ -297,8 +341,7 @@ class MusicControllerView(discord.ui.View):
         except Exception:
             logger.debug("Failed to get original_response for QueuePaginationView", exc_info=True)
 
-    @discord.ui.button(label="收藏", emoji="❤️", style=discord.ButtonStyle.secondary, row=2, custom_id="music_fav_add")
-    async def fav_add(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def fav_add(self, interaction: discord.Interaction):
         cur = self.state.current
         if not cur:
             await interaction.response.send_message(t('not_playing', interaction), ephemeral=True)
@@ -313,7 +356,7 @@ class MusicControllerView(discord.ui.View):
         added, total_count = add_user_favorite(interaction.user.id, song_item)
         if added:
             await interaction.response.send_message(
-                f"❤️ 已將 **{cur.title}** 加入您的個人最愛收藏！（目前共 `{total_count}` 首，隨時可按 `⭐ 播收藏` 或 `/favorite play` 點播）",
+                f"❤️ 已將 **{cur.title}** 加入您的個人最愛收藏！（目前共 `{total_count}` 首，隨時可按 `選擇控制 → 播放收藏` 或 `/favorite play` 點播）",
                 ephemeral=True
             )
         else:
@@ -322,11 +365,10 @@ class MusicControllerView(discord.ui.View):
                 ephemeral=True
             )
 
-    @discord.ui.button(label="播收藏", emoji="⭐", style=discord.ButtonStyle.secondary, row=2, custom_id="music_fav_play")
-    async def fav_play(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def fav_play(self, interaction: discord.Interaction):
         favs = get_user_favorites(interaction.user.id)
         if not favs:
-            await interaction.response.send_message("⭐ 您的個人收藏清單目前是空的！先按旁邊的 `❤️ 收藏` 將喜歡的歌曲存起來吧！", ephemeral=True)
+            await interaction.response.send_message("⭐ 您的個人收藏清單目前是空的！先按`➕` 收藏按鈕將喜歡的歌曲存起來吧！", ephemeral=True)
             return
         if self.state.queue_space() <= 0:
             await interaction.response.send_message(t('queue_full', interaction, max_size=MAX_QUEUE_SIZE), ephemeral=True)
@@ -346,12 +388,10 @@ class MusicControllerView(discord.ui.View):
             self.state.queue.append(s)
             added_count += 1
         self.state.last_active = time.time()
-        embed = build_nowplaying_embed(self.bot, self.state.current, self.state, lang=resolve_locale(interaction))
-        await interaction.response.edit_message(embed=embed, view=self)
+        await self._refresh_interaction(interaction)
         await interaction.followup.send(f"⭐ 已成功將您收藏的 **`{added_count}`** 首最愛歌曲排入當前待播隊列！", ephemeral=True)
 
-    @discord.ui.button(label="打亂", emoji="🔀", style=discord.ButtonStyle.secondary, row=2, custom_id="music_shuffle")
-    async def shuffle_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def shuffle_btn(self, interaction: discord.Interaction):
         if not has_dj_permission(interaction, self.state):
             await interaction.response.send_message(t('dj_permission_denied', interaction, role_id=self.state.dj_role_id), ephemeral=True)
             return
@@ -362,7 +402,23 @@ class MusicControllerView(discord.ui.View):
         random.shuffle(q_list)
         self.state.queue = deque(q_list)
         self.state.last_active = time.time()
-        await interaction.response.send_message(t('shuffle_success', interaction, count=len(self.state.queue)), ephemeral=True)
+        await self._refresh_interaction(interaction)
+        await interaction.followup.send(t('shuffle_success', interaction, count=len(self.state.queue)), ephemeral=True)
+
+
+async def refresh_nowplaying_message(bot: 'MusicNodeBot', state: GuildMusicState) -> None:
+    message = state.nowplaying_message
+    if message is None:
+        return
+    view = state.current_view
+    if not isinstance(view, MusicControllerView) or view.is_finished():
+        if view is not None:
+            view.stop()
+        view = MusicControllerView(bot, state)
+        state.current_view = view
+    else:
+        view._update_button_states()
+    await message.edit(content=None, embeds=[], view=view)
 
 
 class _SearchSelectMenu(discord.ui.Select['SearchSelectView']):

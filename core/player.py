@@ -37,11 +37,25 @@ from i18n import t
 from lyrics import get_lyrics_async
 from metrics import inc
 from platforms.youtube import extract_stream_url_sync, fetch_autoplay_recommendation
-from ui.embeds import build_nowplaying_embed
-from ui.views import MusicControllerView
+from ui.views import MusicControllerView, refresh_nowplaying_message
 
 
-async def _progress_updater(bot: Any, guild: discord.Guild, state: GuildMusicState, song: Song, message: discord.Message) -> None:
+async def _refresh_progress_card(bot: Any, state: GuildMusicState) -> bool:
+    message = state.nowplaying_message
+    if not message:
+        return True
+    try:
+        await refresh_nowplaying_message(bot, state)
+    except discord.NotFound:
+        return state.nowplaying_message is not message
+    except discord.Forbidden:
+        return False
+    except Exception:
+        logger.debug("Ignored exception in _progress_updater", exc_info=True)
+    return True
+
+
+async def _progress_updater(bot: Any, guild: discord.Guild, state: GuildMusicState, song: Song) -> None:
     try:
         while state.is_playing and state.current == song:
             await asyncio.sleep(15)
@@ -50,13 +64,8 @@ async def _progress_updater(bot: Any, guild: discord.Guild, state: GuildMusicSta
             vc = guild.voice_client or discord.utils.get(getattr(bot, 'voice_clients', []), guild__id=guild.id)
             if not vc or not is_vc_connected(vc) or is_vc_paused(vc):
                 continue
-            embed = build_nowplaying_embed(bot, song, state)
-            try:
-                await message.edit(embed=embed)
-            except (discord.NotFound, discord.Forbidden):
+            if not await _refresh_progress_card(bot, state):
                 break
-            except Exception:
-                logger.debug("Ignored exception in _progress_updater", exc_info=True)
     except asyncio.CancelledError:
         pass
     except Exception:
@@ -89,8 +98,7 @@ async def _preload_and_lyrics_worker(bot: Any, guild: discord.Guild, state: Guil
             state.current_lyrics = lyrics_res
             if lyrics_res[2] and state.nowplaying_message:
                 try:
-                    embed = build_nowplaying_embed(bot, song, state)
-                    await state.nowplaying_message.edit(embed=embed)
+                    await refresh_nowplaying_message(bot, state)
                 except Exception:
                     logger.debug("Ignored exception in _preload_and_lyrics_worker", exc_info=True)
 
@@ -134,24 +142,23 @@ async def _send_clean_nowplaying(bot: Any, guild: discord.Guild, state: GuildMus
         with contextlib.suppress(Exception):
             await old_msg.delete()
 
-    embed = build_nowplaying_embed(bot, song, state)
     view = MusicControllerView(bot, state)
     state.current_view = view
 
     msg = None
     try:
-        msg = await target_channel.send(embed=embed, view=view)
+        msg = await target_channel.send(view=view)
     except Exception as e:
         logger.warning(f"[{bot.node_name}] 發送 Now Playing 卡片失敗至 {getattr(target_channel, 'name', target_channel)}: {e}")
         vch = state.voice_channel
         if vch and vch != target_channel and hasattr(vch, 'send'):
             with contextlib.suppress(Exception):
-                msg = await vch.send(embed=embed, view=view)
+                msg = await vch.send(view=view)
                 state.text_channel = vch
 
     if msg:
         state.nowplaying_message = msg
-        state.progress_task = bot.loop.create_task(_progress_updater(bot, guild, state, song, msg))
+        state.progress_task = bot.loop.create_task(_progress_updater(bot, guild, state, song))
         state.preload_task = bot.loop.create_task(_preload_and_lyrics_worker(bot, guild, state, song))
 
 
