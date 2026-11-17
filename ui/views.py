@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any, Optional, Union
 import discord
 
 from config import (
+    EQ_PRESETS,
     MAX_QUEUE_SIZE,
     add_user_favorite,
     format_duration,
@@ -13,6 +14,7 @@ from config import (
     logger,
     save_guild_setting,
 )
+from core.audio_controls import apply_player_eq, apply_player_speed, apply_player_volume, seek_player
 from core.models import (
     GuildMusicState,
     Song,
@@ -127,6 +129,60 @@ class _MusicControlSelect(discord.ui.Select['MusicControllerView']):
         await self.controller.on_control(interaction, self.values[0])
 
 
+class _VolumeModal(discord.ui.Modal):
+    def __init__(self, controller: 'MusicControllerView', user_id: int):
+        super().__init__(title=t('player_volume_title', lang=controller.lang), timeout=120)
+        self.controller = controller
+        self.user_id = user_id
+        self.song = controller.state.current
+        self.volume_input: discord.ui.TextInput = discord.ui.TextInput(
+            label=t('player_volume_label', lang=controller.lang),
+            placeholder=t('player_volume_hint', lang=controller.lang),
+            default=str(int(controller.state.volume * 100)), min_length=1, max_length=3,
+        )
+        self.add_item(self.volume_input)
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        if interaction.user.id != self.user_id or self.controller.state.current is not self.song:
+            await interaction.response.send_message(t('not_playing', interaction), ephemeral=True)
+            return
+        value = self.volume_input.value.strip()
+        if not value.isascii() or not value.isdigit() or not 0 <= int(value) <= 200:
+            await interaction.response.send_message(t('player_invalid_volume', lang=self.controller.lang), ephemeral=True)
+            return
+        await self.controller.apply_setting(interaction, 'volume', value)
+
+
+class _PlayerSettingSelect(discord.ui.Select['_PlayerSettingView']):
+    async def callback(self, interaction: discord.Interaction) -> None:
+        if self.view is not None:
+            await self.view.controller.apply_setting(interaction, self.view.action, self.values[0])
+
+
+class _PlayerSettingView(discord.ui.View):
+    def __init__(self, controller: 'MusicControllerView', user_id: int, action: str):
+        super().__init__(timeout=120)
+        self.controller = controller
+        self.user_id = user_id
+        self.action = action
+        self.song = controller.state.current
+        if action == 'equalizer':
+            options = [discord.SelectOption(label=t(f'player_eq_{preset}', lang=controller.lang), value=preset,
+                                           default=preset == controller.state.filter) for preset in EQ_PRESETS]
+        else:
+            options = [discord.SelectOption(label=f'{value}x', value=str(value),
+                                           default=value == controller.state.playback_speed)
+                       for value in (0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0)]
+        key = 'player_eq_picker' if action == 'equalizer' else 'player_speed_picker'
+        self.add_item(_PlayerSettingSelect(placeholder=t(key, lang=controller.lang), options=options))
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.user_id or self.controller.state.current is not self.song:
+            await interaction.response.send_message(t('not_playing', interaction), ephemeral=True)
+            return False
+        return await self.controller.interaction_check(interaction)
+
+
 class MusicControllerView(discord.ui.LayoutView):
     def __init__(self, bot: 'MusicNodeBot', state: GuildMusicState, lang: Optional[str] = None):
         super().__init__(timeout=None)
@@ -145,24 +201,29 @@ class MusicControllerView(discord.ui.LayoutView):
             _MusicButton(self, 'skip', '⏭️'),
             _MusicButton(self, 'fav_add', '➕'),
         )
-        actions = (
-            ('view_queue', 'queue', '📜'),
-            ('view_lyrics', 'lyrics', '💬'),
-            ('toggle_loop', 'loop', '🔁'),
-            ('volume_down', 'volume_down', '🔉'),
-            ('volume_up', 'volume_up', '🔊'),
-            ('toggle_autoplay', 'autoplay', '📻'),
-            ('fav_play', 'favorites', '⭐'),
-            ('stop_btn', 'stop', '⏹️'),
+        eq_name = t(f'player_eq_{self.state.filter}', lang=self.lang)
+        actions: tuple[tuple[str, str, str, dict[str, Any]], ...] = (
+            ('volume', 'volume', '🔊', {'percent': int(self.state.volume * 100)}),
+            ('toggle_loop', f'repeat_{self.state.loop_mode}', '🔁', {}),
+            ('rewind', 'rewind', '⏪', {}),
+            ('forward', 'forward', '⏩', {}),
+            ('view_queue', 'queue', '📜', {}),
+            ('toggle_autoplay', 'autoplay', '✨', {}),
+            ('equalizer', 'eq', '🎚️', {'preset': eq_name}),
+            ('speed', 'speed', '⏱️', {'value': str(self.state.playback_speed)}),
+            ('sing_along', 'sing_along', '🎤', {}),
+            ('view_lyrics', 'lyrics', '📃', {}),
+            ('stop_btn', 'stop', '⏹️', {}),
         )
-        descriptions = {
-            'toggle_loop': t(f'loop_{self.state.loop_mode}', lang=self.lang),
-            'volume_down': f'{int(self.state.volume * 100)}%',
-            'volume_up': f'{int(self.state.volume * 100)}%',
-            'toggle_autoplay': '✅' if self.state.autoplay else '❌',
+        state_suffixes = {
+            'toggle_autoplay': f" ({t('player_enabled' if self.state.autoplay else 'player_disabled', lang=self.lang)})",
+            'sing_along': f" ({t('player_enabled' if self.state.sing_along else 'player_disabled', lang=self.lang)})",
         }
-        options = [discord.SelectOption(label=t(f'player_{key}', lang=self.lang), value=action, emoji=emoji,
-                                        description=descriptions.get(action)) for action, key, emoji in actions]
+        options = [discord.SelectOption(
+            label=(t(f'player_{key}', lang=self.lang, **params) + state_suffixes.get(action, ''))[:100], value=action, emoji=emoji,
+            description=t(f'player_{key}_desc', lang=self.lang)[:100],
+            default=False,
+        ) for action, key, emoji, params in actions]
         menu = discord.ui.ActionRow(_MusicControlSelect(self,
             custom_id='music_controls', placeholder=t('player_select_control', lang=self.lang),
             min_values=1, max_values=1, options=options,
@@ -189,14 +250,130 @@ class MusicControllerView(discord.ui.LayoutView):
 
     async def on_control(self, interaction: discord.Interaction, action: str) -> None:
         actions = {
-            'view_queue': self.view_queue, 'view_lyrics': self.view_lyrics,
-            'toggle_loop': self.toggle_loop, 'volume_down': self.volume_down,
-            'volume_up': self.volume_up, 'toggle_autoplay': self.toggle_autoplay,
-            'fav_play': self.fav_play, 'stop_btn': self.stop_btn,
+            'volume': self.volume, 'toggle_loop': self.toggle_loop,
+            'rewind': self.rewind, 'forward': self.forward, 'view_queue': self.view_queue,
+            'toggle_autoplay': self.toggle_autoplay, 'equalizer': self.equalizer,
+            'speed': self.speed, 'sing_along': self.sing_along,
+            'view_lyrics': self.view_lyrics, 'stop_btn': self.stop_btn,
         }
         handler = actions.get(action)
         if handler is not None:
             await handler(interaction)
+
+    async def _can_change_player(self, interaction: discord.Interaction) -> bool:
+        if not await self.interaction_check(interaction):
+            return False
+        if not has_dj_permission(interaction, self.state):
+            await interaction.response.send_message(t('dj_permission_denied', interaction, role_id=self.state.dj_role_id), ephemeral=True)
+            return False
+        return True
+
+    async def volume(self, interaction: discord.Interaction) -> None:
+        if await self._can_change_player(interaction):
+            await interaction.response.send_modal(_VolumeModal(self, interaction.user.id))
+
+    async def equalizer(self, interaction: discord.Interaction) -> None:
+        await self._open_setting(interaction, 'equalizer')
+
+    async def speed(self, interaction: discord.Interaction) -> None:
+        await self._open_setting(interaction, 'speed')
+
+    async def _open_setting(self, interaction: discord.Interaction, action: str) -> None:
+        if not await self._can_change_player(interaction):
+            return
+        panel = _PlayerSettingView(self, interaction.user.id, action)
+        key = 'player_eq_picker' if action == 'equalizer' else 'player_speed_picker'
+        await interaction.response.send_message(t(key, lang=self.lang), view=panel, ephemeral=True)
+
+    async def _refresh_main_card(self) -> None:
+        try:
+            await refresh_nowplaying_message(self.bot, self.state)
+        except Exception:
+            logger.debug('Could not refresh the player card after applying a control', exc_info=True)
+
+    async def apply_setting(self, interaction: discord.Interaction, action: str, value: str) -> None:
+        if not await self._can_change_player(interaction):
+            return
+        vc = self._get_vc(interaction)
+        if not vc:
+            await interaction.response.send_message(t('not_playing', interaction), ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            message = await self._apply_setting_value(vc, action, value)
+            await self._refresh_main_card()
+        except Exception:
+            message = t('player_control_failed', lang=self.lang)
+            logger.debug('Player control %s failed', action, exc_info=True)
+        await interaction.followup.send(message, ephemeral=True)
+
+    async def _apply_setting_value(self, vc: Any, action: str, value: str) -> str:
+        if action == 'volume':
+            percent = int(value)
+            await apply_player_volume(self.bot, self.state, vc, percent)
+            return t('player_volume_updated', lang=self.lang, percent=percent)
+        if action == 'equalizer':
+            await apply_player_eq(self.bot, self.state, vc, value)
+            return t('player_eq_updated', lang=self.lang, preset=t(f'player_eq_{value}', lang=self.lang))
+        await apply_player_speed(self.bot, self.state, vc, float(value))
+        return t('player_speed_updated', lang=self.lang, value=str(float(value)))
+
+    async def rewind(self, interaction: discord.Interaction) -> None:
+        await self._seek_relative(interaction, -15)
+
+    async def forward(self, interaction: discord.Interaction) -> None:
+        await self._seek_relative(interaction, 15)
+
+    async def _seek_relative(self, interaction: discord.Interaction, seconds: int) -> None:
+        if not await self._can_change_player(interaction):
+            return
+        if not self.state.current or not self.state.current.duration:
+            await interaction.response.send_message(t('player_live_seek_unavailable', lang=self.lang), ephemeral=True)
+            return
+        vc = self._get_vc(interaction)
+        if not vc:
+            await interaction.response.send_message(t('not_playing', interaction), ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            await seek_player(self.bot, self.state, vc, get_playback_elapsed(self.state) + seconds)
+            await self._refresh_main_card()
+            elapsed = get_playback_elapsed(self.state)
+            clock = f'{elapsed // 60:02d}:{elapsed % 60:02d}'
+            message = t('seek_success', lang=self.lang, time_str=clock)
+        except Exception:
+            message = t('player_control_failed', lang=self.lang)
+            logger.debug('Relative seek failed', exc_info=True)
+        await interaction.followup.send(message, ephemeral=True)
+
+    async def sing_along(self, interaction: discord.Interaction) -> None:
+        if not await self._can_change_player(interaction):
+            return
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        if self.state.sing_along:
+            self.state.sing_along = False
+        else:
+            song = self.state.current
+            if not song:
+                await interaction.followup.send(t('not_playing', lang=self.lang), ephemeral=True)
+                return
+            try:
+                result = self.state.current_lyrics or await get_lyrics_async(song.title, song.uploader or '')
+            except Exception:
+                logger.debug('Synced lyrics lookup failed', exc_info=True)
+                await interaction.followup.send(t('player_control_failed', lang=self.lang), ephemeral=True)
+                return
+            if self.state.current is not song or self.state.current_view is not self:
+                await interaction.followup.send(t('not_playing', lang=self.lang), ephemeral=True)
+                return
+            if not result or not result[2]:
+                await interaction.followup.send(t('player_singalong_unavailable', lang=self.lang), ephemeral=True)
+                return
+            self.state.current_lyrics = result
+            self.state.sing_along = True
+        await self._refresh_main_card()
+        status = t('player_enabled' if self.state.sing_along else 'player_disabled', lang=self.lang)
+        await interaction.followup.send(t('player_sing_along_updated', lang=self.lang, state=status), ephemeral=True)
 
     def _get_vc(self, interaction: discord.Interaction) -> Any:
         gid = interaction.guild_id or self.state.guild_id
@@ -277,28 +454,10 @@ class MusicControllerView(discord.ui.LayoutView):
         await interaction.followup.send(t('stopped_and_left', interaction, bot_name=self.bot.node_name), ephemeral=True)
 
     async def volume_down(self, interaction: discord.Interaction):
-        vc = self._get_vc(interaction)
-        if not vc:
-            await interaction.response.send_message(t('not_playing', interaction), ephemeral=True)
-            return
-        self.state.last_active = time.time()
-        self.state.volume = max(0.0, round(self.state.volume - 0.1, 2))
-        save_guild_setting(self.state.guild_id, "volume", self.state.volume)
-        if hasattr(vc, 'source') and hasattr(vc.source, 'volume'):
-            vc.source.volume = self.state.volume
-        await self._refresh_interaction(interaction)
+        await self.apply_setting(interaction, 'volume', str(max(0, int(self.state.volume * 100) - 10)))
 
     async def volume_up(self, interaction: discord.Interaction):
-        vc = self._get_vc(interaction)
-        if not vc:
-            await interaction.response.send_message(t('not_playing', interaction), ephemeral=True)
-            return
-        self.state.last_active = time.time()
-        self.state.volume = min(2.0, round(self.state.volume + 0.1, 2))
-        save_guild_setting(self.state.guild_id, "volume", self.state.volume)
-        if hasattr(vc, 'source') and hasattr(vc.source, 'volume'):
-            vc.source.volume = self.state.volume
-        await self._refresh_interaction(interaction)
+        await self.apply_setting(interaction, 'volume', str(min(200, int(self.state.volume * 100) + 10)))
 
     async def toggle_autoplay(self, interaction: discord.Interaction):
         self.state.autoplay = not self.state.autoplay
@@ -310,9 +469,13 @@ class MusicControllerView(discord.ui.LayoutView):
             await interaction.response.send_message(t('not_playing', interaction), ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True)
-        target_title = self.state.current.title
-        target_artist = self.state.current.uploader or ""
+        song = self.state.current
+        target_title = song.title
+        target_artist = song.uploader or ""
         res = self.state.current_lyrics or await get_lyrics_async(target_title, target_artist)
+        if self.state.current is not song:
+            await interaction.followup.send(t('not_playing', interaction), ephemeral=True)
+            return
         if not res:
             await interaction.followup.send(t('lyrics_not_found', interaction, title=target_title), ephemeral=True)
             return
@@ -356,7 +519,7 @@ class MusicControllerView(discord.ui.LayoutView):
         added, total_count = add_user_favorite(interaction.user.id, song_item)
         if added:
             await interaction.response.send_message(
-                f"❤️ 已將 **{cur.title}** 加入您的個人最愛收藏！（目前共 `{total_count}` 首，隨時可按 `選擇控制 → 播放收藏` 或 `/favorite play` 點播）",
+                f"❤️ 已將 **{cur.title}** 加入您的個人最愛收藏！（目前共 `{total_count}` 首，隨時可用 `/favorite play` 點播）",
                 ephemeral=True
             )
         else:

@@ -1,30 +1,21 @@
-import asyncio
-import time
 from typing import Any, Optional
 import discord
 from discord import app_commands
 from config import (
-    run_media,
-    HAS_WAVELINK,
-    BASSBOOST_PRESETS,
     LAVALINK_URI,
     save_guild_setting,
-    get_ffmpeg_options,
     logger
 )
 from i18n import t
+from core.audio_controls import apply_player_eq, seek_player
 from core.models import (
-    BufferedAudioSource,
     GuildMusicState,
+    get_playback_elapsed,
     is_vc_connected,
-    is_vc_playing,
     is_vc_paused,
     safe_pause_resume,
     has_dj_permission,
-    safe_voice_connect,
-    hot_swap_current_stream,
-    apply_encoder_bitrate,
-    make_after_callback
+    safe_voice_connect
 )
 from core.node import NODE_BOTS, MusicNodeBot
 from core.dispatcher import (
@@ -32,25 +23,8 @@ from core.dispatcher import (
     get_bot_in_user_room,
     get_user_voice_channel
 )
-from core.player import safe_stop
-from platforms.youtube import extract_stream_url_sync
 from ui.embeds import format_duration
 from utils import parse_time_str
-
-
-async def _resolve_seek_stream(state: GuildMusicState) -> Optional[str]:
-    if not state.current:
-        return None
-    stream_url = getattr(state.current, 'stream_url', '')
-    if not stream_url or not stream_url.startswith('http'):
-        cur_url = state.current.url
-        cur_title = state.current.title
-        stream_url, _, _ = await run_media(
-            lambda u=cur_url, ti=cur_title: extract_stream_url_sync(u, ti)
-        )
-    if stream_url:
-        state.current.stream_url = stream_url
-    return stream_url
 
 
 async def _refresh_nowplaying_after_seek(b: MusicNodeBot, state: GuildMusicState) -> None:
@@ -60,62 +34,6 @@ async def _refresh_nowplaying_after_seek(b: MusicNodeBot, state: GuildMusicState
             await refresh_nowplaying_message(b, state)
         except Exception:
             logger.debug("Failed to update nowplaying card after seek", exc_info=True)
-
-
-async def _seek_native_ffmpeg(
-    interaction: discord.Interaction,
-    b: MusicNodeBot,
-    bot_guild: Optional[discord.Guild],
-    vc: Any,
-    state: GuildMusicState,
-    target_sec: int,
-) -> None:
-    if not state.current:
-        return
-    await interaction.response.defer()
-    state.is_seeking = True
-    stream_url = await _resolve_seek_stream(state)
-    if not stream_url:
-        state.is_seeking = False
-        await interaction.followup.send("❌ 無法提取音訊串流以執行跳轉！", ephemeral=True)
-        return
-
-    if is_vc_playing(vc) or is_vc_paused(vc):
-        await safe_stop(vc)
-
-    buffered_source: Optional[BufferedAudioSource] = None
-    try:
-        ffmpeg_opts = get_ffmpeg_options(state, seek_seconds=target_sec)
-        source = discord.FFmpegPCMAudio(
-            stream_url,
-            before_options=ffmpeg_opts.get('before_options'),
-            options=ffmpeg_opts.get('options'),
-        )
-        buffered_source = BufferedAudioSource(source, prefetch_frames=50, max_frames=500)
-        audio_source = discord.PCMVolumeTransformer(buffered_source, volume=state.volume)
-
-        after_callback = make_after_callback(b, bot_guild, state)
-        apply_encoder_bitrate(vc)
-        if is_vc_playing(vc) or is_vc_paused(vc):
-            await safe_stop(vc)
-            await asyncio.sleep(0.05)
-
-        vc.play(audio_source, after=after_callback)
-        state.start_time = time.time() - target_sec
-        state.paused_duration = 0.0
-        state.pause_timestamp = 0.0
-        state.is_seeking = False
-        state.last_active = time.time()
-        await _refresh_nowplaying_after_seek(b, state)
-        await interaction.followup.send(t('seek_success', interaction, time_str=format_duration(target_sec)))
-    except Exception as e:
-        state.is_seeking = False
-        try:
-            if buffered_source:
-                buffered_source.cleanup()
-        except Exception:
-            logger.debug("Ignored exception in slash_seek", exc_info=True)
-        await interaction.followup.send(f"❌ 跳轉執行失敗: `{e}`", ephemeral=True)
 
 
 async def _handle_seek(interaction: discord.Interaction, time_str: str) -> None:
@@ -154,18 +72,18 @@ async def _handle_seek(interaction: discord.Interaction, time_str: str) -> None:
         await interaction.response.send_message(t('not_playing', interaction), ephemeral=True)
         return
 
-    if b.lavalink_connected and HAS_WAVELINK and hasattr(vc, 'seek'):
-        try:
-            await vc.seek(target_sec * 1000)
-            state.start_time = time.time() - target_sec
-            state.paused_duration = 0.0
-            state.pause_timestamp = 0.0
-            await interaction.response.send_message(t('seek_success', interaction, time_str=format_duration(target_sec)))
-            return
-        except Exception as e:
-            logger.error(f"[{b.node_name}] Lavalink Seek Error: {e}")
-
-    await _seek_native_ffmpeg(interaction, b, bot_guild, vc, state, target_sec)
+    if not has_dj_permission(interaction, state):
+        await interaction.response.send_message(t('dj_permission_denied', interaction, role_id=state.dj_role_id), ephemeral=True)
+        return
+    await interaction.response.defer()
+    try:
+        await seek_player(b, state, vc, target_sec)
+        await _refresh_nowplaying_after_seek(b, state)
+        elapsed = get_playback_elapsed(state)
+        clock = f'{elapsed // 60:02d}:{elapsed % 60:02d}'
+        await interaction.followup.send(t('seek_success', interaction, time_str=clock))
+    except (ValueError, RuntimeError):
+        await interaction.followup.send(t('player_control_failed', interaction), ephemeral=True)
 
 
 async def _handle_pause(interaction: discord.Interaction) -> None:
@@ -308,65 +226,22 @@ async def _handle_bassboost(interaction: discord.Interaction, level: app_command
         return
 
     state = b.get_state(interaction.guild_id)
-    state.bassboost = level.value
-    save_guild_setting(interaction.guild_id, "bassboost", level.value)
-    choice_label = level.name
-
     bot_guild = get_bot_guild(b, interaction.guild_id, interaction.guild) or interaction.guild
     vc: Any = (bot_guild.voice_client if bot_guild else None) or discord.utils.get(
         getattr(b, 'voice_clients', []), guild__id=interaction.guild_id
     )
-    if b.lavalink_connected and HAS_WAVELINK and vc and hasattr(vc, 'filters'):
-        try:
-            filters = vc.filters
-            bb_gain = float(BASSBOOST_PRESETS.get(state.bassboost, {}).get("gain", 0.0))
-            if bb_gain > 0:
-                filters.equalizer.set(bands=[
-                    {"band": 0, "gain": bb_gain},
-                    {"band": 1, "gain": bb_gain * 0.8},
-                    {"band": 2, "gain": bb_gain * 0.5},
-                    {"band": 3, "gain": bb_gain * 0.2},
-                ])
-            else:
-                filters.equalizer.reset()
-            await vc.set_filters(filters)
-            await interaction.response.send_message(
-                f"⚡ 【{b.node_name}】Lavalink 32-bit DSP 重低音已**毫秒級即時生效**：**{choice_label}**！"
-            )
-            return
-        except Exception as e:
-            logger.warning(f"[Bassboost Error] {e}")
-
-    if vc and (is_vc_playing(vc) or is_vc_paused(vc)) and state.current:
-        await interaction.response.defer()
-        swapped = await hot_swap_current_stream(b, bot_guild, vc, state)
-        if swapped:
-            await interaction.followup.send(
-                f"🎛️ 【{b.node_name}】重低音已**原地秒級熱切換生效**：**{choice_label}**！(384k 錄音室級 DSP)"
-            )
-            return
-        await interaction.followup.send(f"🎛️ 【{b.node_name}】重低音已設為：**{choice_label}**！")
-        return
-
-    await interaction.response.send_message(f"🎛️ 【{b.node_name}】重低音已設為：**{choice_label}**！")
-
-
-async def _try_apply_wavelink_filter(vc: Any, filter_name: str) -> bool:
+    previous = state.bassboost
+    state.bassboost = level.value
+    await interaction.response.defer()
     try:
-        filters = vc.filters
-        if filter_name == "nightcore":
-            filters.timescale.set(speed=1.25, pitch=1.25)
-        elif filter_name == "vaporwave":
-            filters.timescale.set(speed=0.85, pitch=0.8)
-        elif filter_name == "8d":
-            filters.rotation.set(hertz=0.2)
-        elif filter_name == "reset":
-            filters.reset()
-        await vc.set_filters(filters)
-        return True
-    except Exception as e:
-        logger.warning(f"[Filter Error] {e}")
-        return False
+        if state.current and vc:
+            await apply_player_eq(b, state, vc, state.filter)
+        save_guild_setting(interaction.guild_id, 'bassboost', level.value)
+        await _refresh_nowplaying_after_seek(b, state)
+        await interaction.followup.send(t('player_eq_updated', interaction, preset=level.name))
+    except (ValueError, RuntimeError):
+        state.bassboost = previous
+        await interaction.followup.send(t('player_control_failed', interaction), ephemeral=True)
 
 
 async def _handle_filter(interaction: discord.Interaction, preset: app_commands.Choice[str]) -> None:
@@ -381,38 +256,17 @@ async def _handle_filter(interaction: discord.Interaction, preset: app_commands.
         return
 
     state = b.get_state(interaction.guild_id)
-    state.filter = preset.value
-    save_guild_setting(interaction.guild_id, "filter", preset.value)
-    choice_label = preset.name
-
     bot_guild = get_bot_guild(b, interaction.guild_id, interaction.guild) or interaction.guild
     vc: Any = (bot_guild.voice_client if bot_guild else None) or discord.utils.get(
         getattr(b, 'voice_clients', []), guild__id=interaction.guild_id
     )
-    if (
-        b.lavalink_connected
-        and HAS_WAVELINK
-        and vc
-        and hasattr(vc, 'filters')
-        and await _try_apply_wavelink_filter(vc, state.filter)
-    ):
-        await interaction.response.send_message(
-            f"⚡ 【{b.node_name}】Lavalink 專業音效濾鏡已**毫秒級即時生效**：**{choice_label}**！"
-        )
-        return
-
-    if vc and (is_vc_playing(vc) or is_vc_paused(vc)) and state.current:
-        await interaction.response.defer()
-        swapped = await hot_swap_current_stream(b, bot_guild, vc, state)
-        if swapped:
-            await interaction.followup.send(
-                f"🎛️ 【{b.node_name}】音效濾波器已**原地秒級熱切換生效**：**{choice_label}**！(384k 錄音室級編碼)"
-            )
-            return
-        await interaction.followup.send(f"🎛️ 【{b.node_name}】音效濾波器已切換至：**{choice_label}**！")
-        return
-
-    await interaction.response.send_message(f"🎛️ 【{b.node_name}】音效濾波器已切換至：**{choice_label}**！")
+    await interaction.response.defer()
+    try:
+        await apply_player_eq(b, state, vc, preset.value)
+        await _refresh_nowplaying_after_seek(b, state)
+        await interaction.followup.send(t('player_eq_updated', interaction, preset=preset.name))
+    except (ValueError, RuntimeError):
+        await interaction.followup.send(t('player_control_failed', interaction), ephemeral=True)
 
 
 async def _handle_engine(interaction: discord.Interaction) -> None:

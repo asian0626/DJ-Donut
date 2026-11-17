@@ -5,6 +5,7 @@ import discord
 
 from core.models import GuildMusicState, Song, get_playback_elapsed
 from i18n import resolve_locale, t
+from lyrics import get_synced_lyrics_snippet
 
 
 def _plain_text(value: str, limit: int) -> str:
@@ -72,6 +73,16 @@ def _footer(bot: Any, state: GuildMusicState, song: Song, lang: str) -> str:
     return f"-# {requested_by}\n-# {queue_count}"
 
 
+def _sing_along(state: GuildMusicState, elapsed: int, lang: str) -> str:
+    if not getattr(state, 'sing_along', False) or not state.current_lyrics or not state.current_lyrics[2]:
+        return ""
+    snippet = get_synced_lyrics_snippet(state.current_lyrics[1], elapsed, context_lines=1)
+    if not snippet:
+        return ""
+    snippet = discord.utils.escape_mentions(snippet)[:900]
+    return f"### 🎤 {t('player_sing_along', lang=lang)}\n{snippet}"
+
+
 def build_player_card(
     bot: Any,
     state: GuildMusicState,
@@ -89,8 +100,9 @@ def build_player_card(
     top: discord.ui.Item[Any] = heading
     if thumbnail:
         top = discord.ui.Section(heading, accessory=discord.ui.Thumbnail(thumbnail))
-    progress = make_player_progress(get_playback_elapsed(state), song.duration, lang=guild_lang)
-    return discord.ui.Container(
+    elapsed = get_playback_elapsed(state)
+    progress = make_player_progress(elapsed, song.duration, lang=guild_lang)
+    card = discord.ui.Container(
         top,
         discord.ui.Separator(),
         discord.ui.TextDisplay(progress),
@@ -101,3 +113,8 @@ def build_player_card(
         discord.ui.TextDisplay(_footer(bot, state, song, guild_lang)),
         accent_colour=0x5865F2,
     )
+    sing_along = _sing_along(state, elapsed, guild_lang)
+    if sing_along:
+        card.add_item(discord.ui.Separator())
+        card.add_item(discord.ui.TextDisplay(sing_along))
+    return card

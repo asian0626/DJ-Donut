@@ -7,7 +7,6 @@ import discord
 
 from config import (
     APPLE_MUSIC_URL_REGEX,
-    BASSBOOST_PRESETS,
     HAS_WAVELINK,
     NETEASE_URL_REGEX,
     SPOTIFY_URL_REGEX,
@@ -32,7 +31,9 @@ from core.models import (
     safe_disconnect,
     safe_stop,
     safe_voice_connect,
+    set_playback_position,
 )
+from core.audio_controls import build_wavelink_filters
 from i18n import t
 from lyrics import get_lyrics_async
 from metrics import inc
@@ -58,7 +59,8 @@ async def _refresh_progress_card(bot: Any, state: GuildMusicState) -> bool:
 async def _progress_updater(bot: Any, guild: discord.Guild, state: GuildMusicState, song: Song) -> None:
     try:
         while state.is_playing and state.current == song:
-            await asyncio.sleep(15)
+            synced = state.current_lyrics and state.current_lyrics[2]
+            await asyncio.sleep(5 if state.sing_along and synced else 15)
             if not state.is_playing or state.current != song:
                 break
             vc = guild.voice_client or discord.utils.get(getattr(bot, 'voice_clients', []), guild__id=guild.id)
@@ -266,29 +268,9 @@ async def _resolve_wavelink_track(bot: Any, song: Song) -> None:
         logger.warning(f"[{bot.node_name}] Lavalink 搜尋音軌略過 ({search_err})")
 
 
-def _apply_wavelink_filters(filters: Any, state: GuildMusicState) -> None:
-    bb_gain = float((BASSBOOST_PRESETS.get(state.bassboost) or {}).get("gain", 0.0))
-    if bb_gain > 0:
-        filters.equalizer.set(bands=[
-            {"band": 0, "gain": bb_gain},
-            {"band": 1, "gain": bb_gain * 0.8},
-            {"band": 2, "gain": bb_gain * 0.5},
-            {"band": 3, "gain": bb_gain * 0.2}
-        ])
-    else:
-        filters.equalizer.reset()
-
-    if state.filter == "nightcore":
-        filters.timescale.set(speed=1.25, pitch=1.25)
-    elif state.filter == "vaporwave":
-        filters.timescale.set(speed=0.85, pitch=0.8)
-    elif state.filter == "8d":
-        filters.rotation.set(hertz=0.2)
-    elif state.filter == "reset" and bb_gain == 0:
-        filters.reset()
-
-
-async def _try_play_wavelink(bot: Any, guild: discord.Guild, state: GuildMusicState, vc: Any, song: Song) -> bool:
+async def _try_play_wavelink(
+    bot: Any, guild: discord.Guild, state: GuildMusicState, vc: Any, song: Song, seek_offset: int = 0,
+) -> bool:
     if not (bot.lavalink_connected and HAS_WAVELINK and hasattr(vc, 'play') and hasattr(vc, 'filters')):
         return False
     await _resolve_wavelink_track(bot, song)
@@ -296,10 +278,10 @@ async def _try_play_wavelink(bot: Any, guild: discord.Guild, state: GuildMusicSt
         return False
     try:
         state.active_engine = "⚡ Lavalink v4 (Opus Passthrough)"
-        filters = vc.filters
-        _apply_wavelink_filters(filters, state)
+        filters = build_wavelink_filters(state)
         await vc.set_filters(filters)
-        await vc.play(song.wavelink_track)
+        await vc.play(song.wavelink_track, start=seek_offset * 1000)
+        set_playback_position(state, seek_offset)
         if hasattr(vc, 'set_volume'):
             await vc.set_volume(int(state.volume * 100))
         logger.info(f"[{bot.node_name}] 🎶 正在播放 (Lavalink): {song.title} (伺服器: {guild.name})")
@@ -364,7 +346,7 @@ async def _start_native_ffmpeg_playback(bot: Any, guild: discord.Guild, state: G
             else:
                 vc.play(audio_source, after=make_after_callback(bot, guild, state))
 
-        state.start_time = time.time() - seek_offset
+        set_playback_position(state, seek_offset)
         logger.info(f"[{bot.node_name}] 🎶 正在播放: {song.title} (伺服器: {guild.name})")
         await _send_clean_nowplaying(bot, guild, state, song)
         return True
@@ -419,11 +401,9 @@ async def _attempt_next_song(
     state.current = next_song
     inc('songs_played_total')
     state.is_playing = True
-    state.start_time = time.time() - seek_offset
-    state.paused_duration = 0.0
-    state.pause_timestamp = 0.0
+    set_playback_position(state, seek_offset)
 
-    if await _try_play_wavelink(bot, guild, state, vc, next_song):
+    if await _try_play_wavelink(bot, guild, state, vc, next_song, seek_offset):
         return vc, True
 
     vc = await _ensure_native_vc(bot, state, vc)
