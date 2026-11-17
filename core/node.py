@@ -28,6 +28,7 @@ from core.models import (
     safe_voice_connect,
 )
 from core.player import play_next
+from core.voice_status import clear_voice_status, sync_voice_status
 from httpclient import get_http_session
 from storage import delete_queue_snapshot, load_queue_snapshots, save_queue_snapshot
 
@@ -82,6 +83,13 @@ class MusicNodeBot(commands.Bot):
             self.states[gid] = GuildMusicState(gid)
         return self.states[gid]
 
+    async def close(self) -> None:
+        try:
+            for state in list(self.states.values()):
+                await state.voice_status.close()
+        finally:
+            await super().close()
+
     async def _init_lavalink_if_configured(self) -> None:
         if not (HAS_WAVELINK and LAVALINK_URI):
             return
@@ -134,20 +142,24 @@ class MusicNodeBot(commands.Bot):
 
     async def _handle_self_disconnected(self, guild: discord.Guild, prev_channel: Any) -> None:
         state = self.get_state(guild.id)
+        generation = state.voice_generation
+        current_channel = state.voice_channel
+        if prev_channel is not None and current_channel is not None and prev_channel.id != current_channel.id:
+            return
         was_unexpected = (state.voice_channel is not None or state.is_playing) and not state.skip_requested
         old_np_msg = state.nowplaying_message
         text_ch = state.text_channel
+        await clear_voice_status(state, prev_channel, expected_generation=generation)
+        if state.voice_generation != generation:
+            return
         state.cleanup()
         if old_np_msg:
             try:
                 await old_np_msg.delete()
             except Exception:
                 logger.debug("Ignored exception in _handle_self_disconnected", exc_info=True)
-        bg = self.get_guild(guild.id) or guild
-        vc = (bg.voice_client if bg else None) or discord.utils.get(getattr(self, 'voice_clients', []), guild__id=guild.id)
-        if vc:
-            await safe_stop(vc)
-            await safe_disconnect(vc)
+        if not await self._disconnect_if_current(guild, state, generation):
+            return
         if was_unexpected and text_ch and prev_channel:
             try:
                 from i18n import t
@@ -162,6 +174,18 @@ class MusicNodeBot(commands.Bot):
                 await text_ch.send(embed=embed)
             except Exception:
                 logger.debug("Ignored exception in _handle_self_disconnected", exc_info=True)
+
+    async def _disconnect_if_current(self, guild: discord.Guild, state: GuildMusicState, generation: int) -> bool:
+        if state.voice_generation != generation:
+            return False
+        bg = self.get_guild(guild.id) or guild
+        vc = (bg.voice_client if bg else None) or discord.utils.get(getattr(self, 'voice_clients', []), guild__id=guild.id)
+        if vc:
+            await safe_stop(vc)
+            if state.voice_generation != generation:
+                return False
+            await safe_disconnect(vc)
+        return True
 
     def _schedule_auto_leave(self, vc: Any, state: GuildMusicState) -> None:
         t_task = state._auto_leave_task
@@ -188,8 +212,11 @@ class MusicNodeBot(commands.Bot):
         guild = member.guild
         bot_uid = self.user.id if self.user else None
         if member.id == bot_uid:
+            state = self.get_state(guild.id)
+            state.voice_generation += 1
             if after.channel is not None:
-                self.get_state(guild.id).voice_channel = after.channel
+                state.voice_channel = after.channel
+                await sync_voice_status(state)
             else:
                 await self._handle_self_disconnected(guild, before.channel)
             return
@@ -216,6 +243,7 @@ class MusicNodeBot(commands.Bot):
     async def on_guild_remove(self, guild: discord.Guild) -> None:
         st = self.states.pop(guild.id, None)
         if st:
+            await clear_voice_status(st)
             st.cleanup()
 
     async def _periodic_state_cleanup(self) -> None:

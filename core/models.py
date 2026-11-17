@@ -8,6 +8,7 @@ from typing import Any, Optional, Tuple
 
 import discord
 from utils import get_playback_rate
+from core.voice_status import VoiceChannelStatus, clear_client_voice_status, sync_voice_status
 from core.dave_patch import apply_dave_fix
 
 apply_dave_fix()
@@ -201,6 +202,8 @@ class GuildMusicState:
         self. _auto_leave_task: Optional[asyncio.Task[Any]] = None
         self.nowplaying_message: Optional[discord.Message] = None
         self.voice_channel: Optional[Any] = None
+        self.voice_status = VoiceChannelStatus()
+        self.voice_generation = 0
         self.current_lyrics: Optional[Tuple[str, str, bool]] = None
         self.skip_requested: bool = False
         self.resume_attempts: int = 0
@@ -391,7 +394,7 @@ async def _reanchor_paused_stream(vc: Any, state: 'GuildMusicState', bot: Any, g
         state.is_seeking = False
 
 
-async def safe_pause_resume(vc: Any, state: Optional['GuildMusicState'] = None, bot: Optional[Any] = None, guild: Optional[discord.Guild] = None) -> str:
+async def _toggle_player_pause(vc: Any, state: Optional['GuildMusicState'] = None, bot: Optional[Any] = None, guild: Optional[discord.Guild] = None) -> str:
     if not vc:
         return "none"
     bot = bot or getattr(vc, 'client', None)
@@ -422,6 +425,13 @@ async def safe_pause_resume(vc: Any, state: Optional['GuildMusicState'] = None, 
             state.pause_timestamp = time.time()
         return "paused"
     return "none"
+
+
+async def safe_pause_resume(vc: Any, state: Optional['GuildMusicState'] = None, bot: Optional[Any] = None, guild: Optional[discord.Guild] = None) -> str:
+    result = await _toggle_player_pause(vc, state, bot, guild)
+    if state is not None and result in ('paused', 'resumed'):
+        await sync_voice_status(state, getattr(vc, 'channel', None))
+    return result
 
 
 async def safe_stop(vc: Any) -> None:
@@ -478,6 +488,7 @@ def _prune_client_voice_tracking(vc: Any) -> None:
 async def safe_disconnect(vc: Any) -> None:
     if not vc:
         return
+    await clear_client_voice_status(vc)
     try:
         await safe_stop(vc)
     except Exception:

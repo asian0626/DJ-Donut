@@ -34,6 +34,7 @@ from core.models import (
     set_playback_position,
 )
 from core.audio_controls import build_wavelink_filters
+from core.voice_status import clear_voice_status, sync_voice_status
 from i18n import t
 from lyrics import get_lyrics_async
 from metrics import inc
@@ -127,6 +128,7 @@ def _resolve_target_text_channel(guild: Optional[discord.Guild], state: GuildMus
 
 
 async def _send_clean_nowplaying(bot: Any, guild: discord.Guild, state: GuildMusicState, song: Song) -> None:
+    await sync_voice_status(state)
     target_channel = _resolve_target_text_channel(guild, state)
     if not target_channel:
         logger.warning(f"[{bot.node_name}] 未能為伺服器【{guild.name}】找到可發送 Now Playing 卡片的文字頻道")
@@ -238,6 +240,7 @@ async def _ensure_queue_or_finish(bot: Any, guild: discord.Guild, state: GuildMu
     state.current = None
     state.current_lyrics = None
     state.is_playing = False
+    await clear_voice_status(state)
     state.last_active = time.time()
     state.cancel_progress_task()
     state.cancel_preload_task()
@@ -301,6 +304,7 @@ async def _handle_consecutive_failure(bot: Any, guild: discord.Guild, state: Gui
     if state.consecutive_failures >= 5:
         state.is_playing = False
         state.current = None
+        await clear_voice_status(state)
         state.cancel_progress_task()
         state.cancel_preload_task()
         if state.text_channel:
@@ -330,6 +334,7 @@ async def _start_native_ffmpeg_playback(bot: Any, guild: discord.Guild, state: G
             logger.warning(f"[{bot.node_name}] 語音客戶端未連線，無法播放")
             buffered_source.cleanup()
             state.is_playing = False
+            await clear_voice_status(state)
             return True
 
         apply_encoder_bitrate(vc)
@@ -409,6 +414,7 @@ async def _attempt_next_song(
     vc = await _ensure_native_vc(bot, state, vc)
     if not vc:
         state.is_playing = False
+        await clear_voice_status(state)
         return None, True
 
     state.active_engine = "🔥 Native Studio Engine (384k VBR)"
@@ -439,6 +445,7 @@ async def play_next(bot: Any, guild: Optional[discord.Guild]) -> None:
     vc = await _ensure_connected_vc(bot, guild, state, raw_vc)
     if not vc or not is_vc_connected(vc):
         state.is_playing = False
+        await clear_voice_status(state)
         return
 
     if getattr(vc, 'channel', None):
