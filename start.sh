@@ -5,7 +5,7 @@ cd "$(dirname "$0")"
 export PATH="/opt/homebrew/bin:$PATH"
 
 if [ ! -d ".venv" ]; then
-    echo "❌ 找不到虛擬環境 .venv，正在建立..."
+    echo "找不到虛擬環境 .venv，正在建立..."
     python3 -m venv .venv
     .venv/bin/pip install --upgrade pip
     .venv/bin/pip install -r requirements.txt
