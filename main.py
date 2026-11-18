@@ -37,14 +37,14 @@ def _init_opus() -> None:
         with contextlib.suppress(Exception):
             discord.opus.load_opus(candidate)
             if discord.opus.is_loaded():
-                logger.info(f"🎧 成功載入原生 Opus 音訊庫: {candidate}")
+                logger.info(f"成功載入音訊庫: {candidate}")
                 return
     with contextlib.suppress(Exception):
         discord.opus._OpusStruct.get_opus_version()
         if discord.opus.is_loaded():
-            logger.info("🎧 成功載入系統預設 Opus 音訊庫")
+            logger.info("成功載入音訊庫")
             return
-    logger.warning("⚠️ 未能載入 libopus 音訊庫，語音編碼可能無法運作！")
+    logger.warning("未能載入音訊庫，語音編碼可能無法運作！")
 
 
 def _init_sentry() -> None:
@@ -64,7 +64,7 @@ def _init_sentry() -> None:
             release=f"dj-donut@{__version__}",
             traces_sample_rate=0.1,
         )
-        logger.info("🛡️ Sentry 錯誤追蹤已成功啟用！")
+        logger.info("錯誤追蹤已啟用！")
     except ImportError:
         logger.warning("已配置 SENTRY_DSN 但未安裝 sentry-sdk，如需啟用錯誤監控可執行 pip install 'sentry-sdk[aiohttp]'")
     except Exception as e:
@@ -97,15 +97,11 @@ async def main() -> None:
         print("\n" + "!" * 65)
         print("【錯誤】未找到任何有效的機器人 Token！")
         print("請打開 .env 檔案並填入 1 ~ 5 隻機器人的 Token：")
-        print("BOT_TOKEN_1=你的第1隻機器人Token")
-        print("BOT_TOKEN_2=你的第2隻機器人Token")
-        print("...")
-        print("BOT_TOKEN_5=你的第5隻機器人Token")
         print("!" * 65 + "\n")
         return
 
     print("=" * 65)
-    print(f"🚀 正在初始化多房間音樂機器人矩陣 v{__version__} (共檢測到 {len(TOKENS)} 隻機器人配置)...")
+    print(f"正在啟動 v{__version__} (共檢測到 {len(TOKENS)} 隻機器人)...")
     print("=" * 65)
 
     _init_opus()
@@ -135,4 +131,4 @@ if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        print("\n所有音樂機器人節點已被手動關閉。")
+        print("\n所有機器人已被關閉。")
