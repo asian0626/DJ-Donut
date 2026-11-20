@@ -23,19 +23,27 @@ jobs:
       - name: Install Lint Tools
         run: |
           python -m pip install --upgrade pip
-          pip install ruff
+          pip install -r requirements-dev.txt
 
       - name: Run Ruff Linter
         run: |
           ruff check .
+          mypy .
+          bash -n start.sh
 
   test:
-    name: Unit Tests (Python ${{ matrix.python-version }})
-    runs-on: ubuntu-latest
+    name: Unit Tests (${{ matrix.os }}, Python ${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.10", "3.11", "3.12"]
+        os: [ubuntu-latest]
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+        include:
+          - os: macos-latest
+            python-version: "3.12"
+          - os: macos-latest
+            python-version: "3.14"
 
     steps:
       - name: Checkout Code
@@ -48,9 +56,14 @@ jobs:
           cache: "pip"
 
       - name: Install System Dependencies
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends libopus0 libopus-dev ffmpeg
+
+      - name: Install macOS Audio Dependencies
+        if: runner.os == 'macOS'
+        run: brew install ffmpeg opus
 
       - name: Install Dependencies
         run: |

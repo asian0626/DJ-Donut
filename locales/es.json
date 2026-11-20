@@ -148,5 +148,10 @@
   "player_eq_treble": "Realce de agudos",
   "player_eq_nightcore": "Nightcore",
   "player_eq_vaporwave": "Vaporwave",
-  "player_eq_8d": "Sonido envolvente 8D"
+  "player_eq_8d": "Sonido envolvente 8D",
+  "player_same_room": "Únete al mismo canal de voz que el reproductor para usar este control.",
+  "player_bot_busy": "Ese bot está atendiendo otra sala. Elige otro bot o la asignación automática.",
+  "player_request_cancelled": "Esta solicitud se canceló. Vuelve a enviarla.",
+  "platform_resolve_failed": "No se puede resolver este recurso de {platform}. Puede ser privado, personalizado, restringido o no estar disponible temporalmente. Prueba una canción o lista pública.",
+  "player_reconnecting": "La conexión de voz se está recuperando. Prueba el control en unos instantes."
 }

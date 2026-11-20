@@ -91,7 +91,7 @@ async def _preload_upcoming_stream(state: GuildMusicState, song: Song) -> None:
             upcoming.duration = s_dur
 
 
-async def _preload_and_lyrics_worker(bot: Any, guild: discord.Guild, state: GuildMusicState, song: Song) -> None:
+async def _lyrics_worker(bot: Any, guild: discord.Guild, state: GuildMusicState, song: Song) -> None:
     try:
         await asyncio.sleep(0.8)
         if not state.is_playing or state.current != song:
@@ -105,12 +105,22 @@ async def _preload_and_lyrics_worker(bot: Any, guild: discord.Guild, state: Guil
                 except Exception:
                     logger.debug("Ignored exception in _preload_and_lyrics_worker", exc_info=True)
 
-        await asyncio.sleep(2.5)
-        await _preload_upcoming_stream(state, song)
     except asyncio.CancelledError:
         pass
     except Exception:
         logger.debug("Ignored exception in _preload_and_lyrics_worker", exc_info=True)
+
+
+async def _preload_after_delay(state: GuildMusicState, song: Song) -> None:
+    await asyncio.sleep(3)
+    try:
+        await _preload_upcoming_stream(state, song)
+    except Exception:
+        logger.debug('Next-track preload failed', exc_info=True)
+
+
+async def _preload_and_lyrics_worker(bot: Any, guild: discord.Guild, state: GuildMusicState, song: Song) -> None:
+    await asyncio.gather(_lyrics_worker(bot, guild, state, song), _preload_after_delay(state, song))
 
 
 def _resolve_target_text_channel(guild: Optional[discord.Guild], state: GuildMusicState) -> Optional[Any]:
@@ -276,14 +286,23 @@ async def _try_play_wavelink(
 ) -> bool:
     if not (bot.lavalink_connected and HAS_WAVELINK and hasattr(vc, 'play') and hasattr(vc, 'filters')):
         return False
+    generation = state.playback_generation
     await _resolve_wavelink_track(bot, song)
+    if state.playback_generation != generation or state.current is not song:
+        return True
     if not song.wavelink_track:
         return False
     try:
         state.active_engine = "⚡ Lavalink v4 (Opus Passthrough)"
         filters = build_wavelink_filters(state)
         await vc.set_filters(filters)
+        if state.playback_generation != generation or state.current is not song:
+            return True
         await vc.play(song.wavelink_track, start=seek_offset * 1000)
+        if state.playback_generation != generation or state.current is not song:
+            await safe_stop(vc, reason="cancelled_request")
+            return True
+        state.consecutive_failures = 0
         set_playback_position(state, seek_offset)
         if hasattr(vc, 'set_volume'):
             await vc.set_volume(int(state.volume * 100))
@@ -322,7 +341,24 @@ async def _handle_consecutive_failure(bot: Any, guild: discord.Guild, state: Gui
     return False
 
 
+def _native_start_valid(state: GuildMusicState, song: Song, generation: int) -> bool:
+    return state.playback_generation == generation and state.current is song and state.is_playing
+
+
+async def _wait_first_audio(source: BufferedAudioSource, state: GuildMusicState, song: Song, generation: int) -> bool:
+    for _ in range(50):
+        if not _native_start_valid(state, song, generation):
+            return False
+        if source.first_frame.is_set():
+            return True
+        if source._finished:
+            raise RuntimeError('FFmpeg ended without producing audio frames')
+        await asyncio.sleep(0.1)
+    raise RuntimeError('FFmpeg produced no audio within 5 seconds')
+
+
 async def _start_native_ffmpeg_playback(bot: Any, guild: discord.Guild, state: GuildMusicState, vc: Any, song: Song, seek_offset: int) -> bool:
+    generation = state.playback_generation
     buffered_source: Optional[BufferedAudioSource] = None
     try:
         ffmpeg_opts = get_ffmpeg_options(state, seek_seconds=seek_offset if seek_offset > 0 else None)
@@ -337,21 +373,26 @@ async def _start_native_ffmpeg_playback(bot: Any, guild: discord.Guild, state: G
             await clear_voice_status(state)
             return True
 
+        if not await _wait_first_audio(buffered_source, state, song, generation):
+            buffered_source.cleanup()
+            return True
         apply_encoder_bitrate(vc)
 
         if is_vc_playing(vc) or is_vc_paused(vc):
             state.is_seeking = True
-            await safe_stop(vc)
+            await safe_stop(vc, reason="track_transition")
             await asyncio.sleep(0.05)
             state.is_seeking = False
 
-        if hasattr(vc, 'play'):
-            if asyncio.iscoroutinefunction(vc.play):
-                logger.warning(f"[{bot.node_name}] 警告: vc 為非同步 Player，無法使用原生音源播放")
-            else:
-                vc.play(audio_source, after=make_after_callback(bot, guild, state))
+        if not _native_start_valid(state, song, generation):
+            buffered_source.cleanup()
+            return True
+        if asyncio.iscoroutinefunction(getattr(vc, 'play', None)):
+            raise RuntimeError('Native playback requires a synchronous voice client')
+        vc.play(audio_source, after=make_after_callback(bot, guild, state))
 
         set_playback_position(state, seek_offset)
+        state.consecutive_failures = 0
         logger.info(f"[{bot.node_name}] 🎶 正在播放: {song.title} (伺服器: {guild.name})")
         await _send_clean_nowplaying(bot, guild, state, song)
         return True
@@ -401,6 +442,7 @@ async def _attempt_next_song(
     next_song: Song,
     seek_offset: int,
 ) -> tuple[Any, bool]:
+    generation = state.playback_generation
     if state.current != next_song:
         state.current_lyrics = None
     state.current = next_song
@@ -419,6 +461,8 @@ async def _attempt_next_song(
 
     state.active_engine = "🔥 Native Studio Engine (384k VBR)"
     stream_url = await _resolve_song_stream(next_song)
+    if state.playback_generation != generation or state.current is not next_song or not state.is_playing:
+        return vc, True
     if not stream_url:
         logger.warning(
             f"[{bot.node_name}] 無法提取串流: {next_song.title} (連續失敗: {state.consecutive_failures + 1})，自動嘗試下一首..."
@@ -426,12 +470,11 @@ async def _attempt_next_song(
         should_abort = await _handle_consecutive_failure(bot, guild, state, next_song, notify_single=True)
         return vc, should_abort
 
-    state.consecutive_failures = 0
     done = await _start_native_ffmpeg_playback(bot, guild, state, vc, next_song, seek_offset)
     return vc, done
 
 
-async def play_next(bot: Any, guild: Optional[discord.Guild]) -> None:
+async def _play_next_locked(bot: Any, guild: Optional[discord.Guild]) -> None:
     if not guild:
         return
     state = bot.get_state(guild.id)
@@ -457,3 +500,14 @@ async def play_next(bot: Any, guild: Optional[discord.Guild]) -> None:
         seek_offset = 0
         if finished:
             return
+
+
+async def play_next(bot: Any, guild: Optional[discord.Guild]) -> None:
+    if guild is None:
+        return
+    state = bot.get_state(guild.id)
+    async with state.playback_lock:
+        vc = guild.voice_client or discord.utils.get(getattr(bot, 'voice_clients', []), guild__id=guild.id)
+        if state.reconnecting or (vc and (is_vc_playing(vc) or is_vc_paused(vc)) and state.current and not state.skip_requested):
+            return
+        await _play_next_locked(bot, guild)

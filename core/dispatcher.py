@@ -1,9 +1,11 @@
+import asyncio
+from weakref import WeakValueDictionary
 from typing import TYPE_CHECKING, Any, List, Optional, Tuple, Union
 
 import discord
 
 from config import logger
-from core.models import is_vc_active, is_vc_connected
+from core.models import is_vc_connected
 from core.node import NODE_BOTS
 
 if TYPE_CHECKING:
@@ -44,11 +46,30 @@ def _get_guild_vc(bot: 'MusicNodeBot', guild: discord.Guild, guild_id: int) -> A
     return None
 
 
+_DISPATCH_LOCKS: WeakValueDictionary[int, asyncio.Lock] = WeakValueDictionary()
+
+
+def guild_dispatch_lock(guild_id: int) -> asyncio.Lock:
+    return _DISPATCH_LOCKS.setdefault(guild_id, asyncio.Lock())
+
+
+def _reserved_elsewhere(bot: 'MusicNodeBot', guild: discord.Guild, guild_id: int, channel_id: int) -> bool:
+    current = getattr(_get_guild_vc(bot, guild, guild_id), 'channel', None)
+    state = bot.get_state(guild_id)
+    current = current or state.voice_channel
+    return bool((state.pending_requests or state.reconnecting) and getattr(current, 'id', None) != channel_id)
+
+
+def _unreserved(candidates: List[Tuple['MusicNodeBot', discord.Guild]], guild_id: int, channel_id: int) -> List[Tuple['MusicNodeBot', discord.Guild]]:
+    return [(bot, guild) for bot, guild in candidates if not _reserved_elsewhere(bot, guild, guild_id, channel_id)]
+
+
 def _select_bot_from_candidates(
     available_bots: List[Tuple['MusicNodeBot', discord.Guild]],
     guild_id: int,
     channel_id: int,
 ) -> Tuple[Optional['MusicNodeBot'], bool]:
+    available_bots = _unreserved(available_bots, guild_id, channel_id)
     for b, guild in available_bots:
         vc = _get_guild_vc(b, guild, guild_id)
         ch = getattr(vc, 'channel', None) if vc else None
@@ -65,12 +86,6 @@ def _select_bot_from_candidates(
         ch = getattr(vc, 'channel', None) if vc else None
         members = getattr(ch, 'members', None) if ch else None
         if vc and is_vc_connected(vc) and members is not None and not any(not m.bot for m in members):
-            return b, False
-
-    for b, guild in available_bots:
-        vc = _get_guild_vc(b, guild, guild_id)
-        state = b.get_state(guild_id)
-        if vc and is_vc_connected(vc) and not is_vc_active(vc) and len(state.queue) == 0:
             return b, False
 
     return None, False
@@ -129,9 +144,6 @@ async def get_user_voice_channel(interaction: discord.Interaction) -> Optional[U
     guild = interaction.guild
     if not guild:
         return None
-
-    if isinstance(interaction.channel, (discord.VoiceChannel, discord.StageChannel)):
-        return interaction.channel
 
     member = guild.get_member(interaction.user.id)
     m_voice = getattr(member, 'voice', None) if member else None

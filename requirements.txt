@@ -1,4 +1,4 @@
-discord.py[voice]>=2.7.0
+discord.py[voice]>=2.7.0,<2.8
 aiohttp>=3.9.0
 cachetools>=5.3.0
 davey>=0.1.0

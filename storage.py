@@ -67,6 +67,7 @@ class Storage:
         self._stop = threading.Event()
         self._thread: Optional[threading.Thread] = None
         self._conn: Optional[sqlite3.Connection] = None
+        self._retry_delay = 0.0
         self._load()
 
     # ------------------------------------------------------------------ db
@@ -160,7 +161,8 @@ class Storage:
             self._wake.wait()
             if self._stop.is_set():
                 break
-            time.sleep(self.debounce)   # coalesce bursts of writes
+            if self._stop.wait(max(self.debounce, self._retry_delay)):
+                break
             self._wake.clear()
             try:
                 self.flush()
@@ -196,28 +198,31 @@ class Storage:
 
     def flush(self) -> None:
         """Synchronously persist everything that changed since the last flush."""
-        with self._lock:
-            dirty, self._dirty = self._dirty, set()
-            snapshot: Dict[_Dirty, Any] = {}
-            for kind, ident in dirty:
-                if kind == "guild":
-                    snapshot[(kind, ident)] = copy.deepcopy(self._guilds.get(ident))
-                elif kind == "fav":
-                    snapshot[(kind, ident)] = copy.deepcopy(self._favorites.get(ident))
-                elif kind == "queue":
-                    snapshot[(kind, ident)] = copy.deepcopy(self._queues.get(ident))
-        if not snapshot:
-            return
-        try:
-            with self._db_lock:
+        with self._db_lock:
+            with self._lock:
+                dirty, self._dirty = self._dirty, set()
+                snapshot: Dict[_Dirty, Any] = {}
+                for kind, ident in dirty:
+                    if kind == "guild":
+                        snapshot[(kind, ident)] = copy.deepcopy(self._guilds.get(ident))
+                    elif kind == "fav":
+                        snapshot[(kind, ident)] = copy.deepcopy(self._favorites.get(ident))
+                    elif kind == "queue":
+                        snapshot[(kind, ident)] = copy.deepcopy(self._queues.get(ident))
+            if not snapshot:
+                return
+            try:
                 conn = self._connect()
                 with conn:
                     for (kind, ident), data in snapshot.items():
                         self._write_snapshot_row(conn, kind, ident, data)
-        except sqlite3.Error:
-            logger.exception("SQLite write failed; will retry")
-            with self._lock:
-                self._dirty |= dirty
+                self._retry_delay = 0.0
+            except sqlite3.Error:
+                self._retry_delay = min(30.0, max(1.0, self._retry_delay * 2))
+                logger.exception("SQLite write failed; retrying in %.1fs", self._retry_delay)
+                with self._lock:
+                    self._dirty |= dirty
+                self._wake.set()
 
     def close(self) -> None:
         self._stop.set()

@@ -17,6 +17,7 @@ from typing import Any, Callable, Dict, List, Optional, Sequence
 
 from aiohttp import web
 
+from core.models import is_vc_connected, is_vc_playing
 from settings import METRICS_HOST, METRICS_PORT, __version__, logger
 
 _lock = threading.Lock()
@@ -156,11 +157,13 @@ def create_app(get_bots: Callable[[], Sequence[Any]]) -> web.Application:
                     "node_id": b.node_id,
                     "guild_id": gid,
                     "is_playing": s.is_playing,
+                    "reconnecting": getattr(s, "reconnecting", False),
+                    "pending_requests": getattr(s, "pending_requests", 0),
                     "song": getattr(s.current, "title", None) if s.current else None,
                     "channel_name": getattr(s.voice_channel, "name", None),
                     "members": members,
-                    "vc_connected": matching_vc.is_connected() if matching_vc else False,
-                    "vc_playing": matching_vc.is_playing() if matching_vc else False,
+                    "vc_connected": is_vc_connected(matching_vc),
+                    "vc_playing": is_vc_playing(matching_vc),
                     "vc_mode": getattr(matching_vc, "mode", None),
                     "dave_version": getattr(v_conn, "dave_protocol_version", None),
                     "can_encrypt": getattr(v_conn, "can_encrypt", None),

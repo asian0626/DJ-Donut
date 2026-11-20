@@ -1,3 +1,4 @@
+from contextvars import ContextVar
 import re
 import time
 import urllib.parse
@@ -40,6 +41,7 @@ from core.dispatcher import (
     find_best_bot_for_channel,
     get_bot_in_user_room,
     get_user_voice_channel,
+    guild_dispatch_lock,
 )
 from core.player import play_next, safe_stop, safe_disconnect
 from platforms.spotify import resolve_spotify
@@ -55,6 +57,17 @@ from ui.views import (
     QueuePaginationView,
     SearchSelectView,
 )
+
+
+_PLAY_REQUEST: ContextVar[Optional[Tuple[GuildMusicState, int]]] = ContextVar('play_request', default=None)
+
+
+async def _request_valid(interaction: discord.Interaction, state: GuildMusicState) -> bool:
+    request = _PLAY_REQUEST.get()
+    if request is None or (request[0] is state and request[1] == state.playback_generation):
+        return True
+    await interaction.followup.send(t('player_request_cancelled', interaction), ephemeral=True)
+    return False
 
 
 async def _send_no_bot_available_msg(interaction: discord.Interaction, guild_id: Optional[int]) -> None:
@@ -73,6 +86,15 @@ async def _send_no_bot_available_msg(interaction: discord.Interaction, guild_id:
         await interaction.followup.send(msg)
     else:
         await interaction.followup.send(t('no_bot_available', interaction))
+
+
+def _bot_busy_elsewhere(bot: MusicNodeBot, guild: discord.Guild, target: Any) -> bool:
+    state = bot.get_state(guild.id)
+    channel = getattr(guild.voice_client, 'channel', None) or (state.voice_channel if state.reconnecting else None)
+    if channel is None or channel.id == target.id:
+        return False
+    humans = any(not member.bot for member in getattr(channel, 'members', []))
+    return bool(humans or state.is_playing or state.queue or state.pending_requests)
 
 
 async def _resolve_bot_and_channel_for_play(
@@ -103,6 +125,10 @@ async def _resolve_bot_and_channel_for_play(
     bot_guild = get_bot_guild(selected_bot, guild_id, interaction.guild) or interaction.guild
     if not bot_guild:
         await interaction.followup.send(t('bot_not_in_guild', interaction, bot_name=selected_bot.node_name))
+        return None
+
+    if _bot_busy_elsewhere(selected_bot, bot_guild, voice_channel):
+        await interaction.followup.send(t('player_bot_busy', interaction))
         return None
 
     bot_voice_channel: Any = bot_guild.get_channel(voice_channel.id) or voice_channel
@@ -136,6 +162,8 @@ async def _connect_or_move_bot_vc(
     vc: Any = bot_guild.voice_client or discord.utils.get(
         getattr(selected_bot, 'voice_clients', []), guild__id=guild_id
     )
+    if state.reconnecting:
+        return vc, True
     is_wavelink_player = bool(HAS_WAVELINK and hasattr(vc, 'filters'))
     should_be_wavelink = bool(selected_bot.lavalink_connected and HAS_WAVELINK)
 
@@ -183,7 +211,12 @@ async def _enqueue_or_start_single_song(
     already_in_room: bool,
     require_current_for_queue: bool = True,
 ) -> None:
-    is_busy = is_vc_active(vc) and (state.current is not None if require_current_for_queue else True)
+    if not await _request_valid(interaction, state):
+        return
+    if state.queue_space() <= 0:
+        await interaction.followup.send(t('queue_full', interaction, max_size=MAX_QUEUE_SIZE))
+        return
+    is_busy = state.reconnecting or (is_vc_active(vc) and (state.current is not None if require_current_for_queue else True))
     state.queue.append(song)
     if is_busy:
         embed = build_song_queued_embed(selected_bot, song, state, len(state.queue), interaction)
@@ -267,6 +300,8 @@ async def _import_external_playlist(
     query: str,
     ext_res: Dict[str, Any],
 ) -> None:
+    if not await _request_valid(interaction, state):
+        return
     platform_name = str(ext_res.get('platform_name', '音樂平台'))
     embed_color = int(ext_res.get('color', 0x1DB954))
     tracks = ext_res.get('tracks', [])
@@ -359,7 +394,7 @@ async def _handle_external_platform_play(
     ext_res, platform_label = await _resolve_external_service(query, is_spotify, is_netease)
     if not ext_res or not ext_res.get('tracks'):
         await interaction.followup.send(
-            f"❌ 無法解析該 {platform_label} 連結，請確認該歌曲或播放清單為公開狀態！"
+            t('platform_resolve_failed', interaction, platform=platform_label)
         )
         return
 
@@ -436,6 +471,8 @@ async def _handle_youtube_playlist_play(
         await interaction.followup.send("❌ 讀取播放清單失敗，查無內容！")
         return
 
+    if not await _request_valid(interaction, state):
+        return
     entries = data.get('entries', [])
     valid = [
         item
@@ -540,60 +577,70 @@ async def _handle_play(
         await interaction.followup.send(t('must_join_voice', interaction))
         return
 
-    resolved = await _resolve_bot_and_channel_for_play(interaction, voice_channel, bot_id)
-    if not resolved:
-        return
-    selected_bot, bot_guild, bot_voice_channel, state, already_in_room = resolved
+    async with guild_dispatch_lock(interaction.guild_id or 0):
+        resolved = await _resolve_bot_and_channel_for_play(interaction, voice_channel, bot_id)
+        if not resolved:
+            return
+        selected_bot, bot_guild, bot_voice_channel, state, already_in_room = resolved
+        state.pending_requests += 1
+        request_generation = state.playback_generation
+        try:
+            vc, connected_ok = await _connect_or_move_bot_vc(
+                interaction, selected_bot, bot_guild, bot_voice_channel, voice_channel, state, already_in_room
+            )
+        except BaseException:
+            state.pending_requests -= 1
+            raise
+    request_token = _PLAY_REQUEST.set((state, request_generation))
+    try:
+        if not connected_ok:
+            return
+        if await _try_lavalink_direct_play(
+            interaction, selected_bot, bot_guild, vc, state, voice_channel, query, already_in_room
+        ):
+            return
 
-    vc, connected_ok = await _connect_or_move_bot_vc(
-        interaction, selected_bot, bot_guild, bot_voice_channel, voice_channel, state, already_in_room
-    )
-    if not connected_ok:
-        return
-
-    if await _try_lavalink_direct_play(
-        interaction, selected_bot, bot_guild, vc, state, voice_channel, query, already_in_room
-    ):
-        return
-
-    is_spotify = bool(SPOTIFY_URL_REGEX.search(query))
-    is_netease = bool(
-        NETEASE_URL_REGEX.search(query)
-        or "163cn.tv" in query
-        or "163.lu" in query
-        or "music.163.com" in query
-    )
-    is_apple = bool(
-        APPLE_MUSIC_URL_REGEX.search(query) or "apple.co" in query or "music.apple.com" in query
-    )
-
-    if is_spotify or is_netease or is_apple:
-        await _handle_external_platform_play(
-            interaction,
-            selected_bot,
-            bot_guild,
-            vc,
-            state,
-            voice_channel,
-            query,
-            already_in_room,
-            is_spotify,
-            is_netease,
+        is_spotify = bool(SPOTIFY_URL_REGEX.search(query))
+        is_netease = bool(
+            NETEASE_URL_REGEX.search(query)
+            or "163cn.tv" in query
+            or "163.lu" in query
+            or "music.163.com" in query
         )
-        return
+        is_apple = bool(
+            APPLE_MUSIC_URL_REGEX.search(query) or "apple.co" in query or "music.apple.com" in query
+        )
 
-    if ("playlist" in query.lower()) or ("list=" in query.lower()):
-        await _handle_youtube_playlist_play(interaction, selected_bot, bot_guild, vc, state, query)
-        return
+        if is_spotify or is_netease or is_apple:
+            await _handle_external_platform_play(
+                interaction,
+                selected_bot,
+                bot_guild,
+                vc,
+                state,
+                voice_channel,
+                query,
+                already_in_room,
+                is_spotify,
+                is_netease,
+            )
+            return
 
-    track_data = await _extract_single_track_info(interaction, query)
-    if not track_data:
-        return
+        if ("playlist" in query.lower()) or ("list=" in query.lower()):
+            await _handle_youtube_playlist_play(interaction, selected_bot, bot_guild, vc, state, query)
+            return
 
-    song = Song(track_data, interaction.user)
-    await _enqueue_or_start_single_song(
-        interaction, selected_bot, bot_guild, vc, state, voice_channel, song, already_in_room
-    )
+        track_data = await _extract_single_track_info(interaction, query)
+        if not track_data:
+            return
+
+        song = Song(track_data, interaction.user)
+        await _enqueue_or_start_single_song(
+            interaction, selected_bot, bot_guild, vc, state, voice_channel, song, already_in_room
+        )
+    finally:
+        _PLAY_REQUEST.reset(request_token)
+        state.pending_requests -= 1
 
 
 async def _fetch_google_yt_suggestions(cur_stripped: str) -> List[str]:
@@ -677,7 +724,7 @@ async def _handle_search(interaction: discord.Interaction, keyword: str) -> None
         return
 
     await interaction.response.defer()
-    selected_bot, is_new_join = await find_best_bot_for_channel(
+    selected_bot, _is_new_join = await find_best_bot_for_channel(
         interaction.guild_id, voice_channel, interaction.guild
     )
     if not selected_bot:
@@ -689,7 +736,7 @@ async def _handle_search(interaction: discord.Interaction, keyword: str) -> None
         getattr(selected_bot, 'voice_clients', []), guild__id=interaction.guild_id
     )
 
-    if is_new_join or not vc or not is_vc_connected(vc):
+    if not selected_bot.get_state(interaction.guild_id).reconnecting and (not vc or not is_vc_connected(vc) or getattr(getattr(vc, 'channel', None), 'id', None) != voice_channel.id):
         try:
             vc = await safe_voice_connect(selected_bot, voice_channel, timeout=20.0)
         except Exception as e:
@@ -727,7 +774,7 @@ async def _handle_search(interaction: discord.Interaction, keyword: str) -> None
         )
 
     view = SearchSelectView(selected_bot, bot_guild, interaction.user, entries)
-    msg = await interaction.followup.send(embed=embed, view=view)
+    msg = await interaction.followup.send(embed=embed, view=view, wait=True)
     view.message = msg
 
 
@@ -939,7 +986,9 @@ async def _ensure_vc_connected(
     vc = (bot_guild.voice_client if bot_guild else None) or discord.utils.get(
         getattr(selected_bot, 'voice_clients', []), guild__id=guild_id
     )
-    if is_new_join or not vc or not is_vc_connected(vc):
+    if selected_bot.get_state(guild_id).reconnecting:
+        return vc
+    if not vc or not is_vc_connected(vc) or getattr(getattr(vc, 'channel', None), 'id', None) != voice_channel.id:
         vc = await safe_voice_connect(selected_bot, voice_channel, timeout=timeout)
     return vc
 

@@ -5,8 +5,8 @@
 [![English](https://img.shields.io/badge/Language-English-blue?style=flat-square)](README.md)
 [![繁體中文](https://img.shields.io/badge/語言-繁體中文-red?style=flat-square)](README_zh-TW.md)
 
-![Version](https://img.shields.io/badge/Version-v2.0.0-blue?logo=git)
-![Python](https://img.shields.io/badge/Python-3.10%20%7C%203.11%20%7C%203.12-3776AB?logo=python&logoColor=white)
+![Version](https://img.shields.io/badge/Version-v2.1.0-blue?logo=git)
+![Python](https://img.shields.io/badge/Python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13%20%7C%203.14-3776AB?logo=python&logoColor=white)
 ![Discord.py](https://img.shields.io/badge/Discord.py-v2.7.0%2B-5865F2?logo=discord&logoColor=white)
 ![Lavalink](https://img.shields.io/badge/Lavalink-v4.0%2B-FF3366?logo=audacity&logoColor=white)
 ![Docker](https://img.shields.io/badge/Docker-Supported-2496ED?logo=docker&logoColor=white)
@@ -62,9 +62,9 @@ You can invite the pre-hosted **DJ Donut** cluster directly to your server:
 
 ## Player Interface
 
-DJ Donut 2.0.0 uses Discord Components V2 for the player shown by `/play` and `/nowplaying`. The main row provides shuffle, replay, pause/resume, skip, and favorite. The menu provides volume, repeat, rewind 15 seconds, forward 15 seconds, queue, autoplay, EQ, speed, Sing Along, lyrics, and stop.
+DJ Donut 2.1.0 uses Discord Components V2 for the player shown by `/play` and `/nowplaying`. The main row provides shuffle, replay, pause/resume, skip, and favorite. The menu provides volume, repeat, rewind 15 seconds, forward 15 seconds, queue, autoplay, EQ, speed, Sing Along, lyrics, and stop.
 
-Read the [English player and upgrade guide](docs/player-interface.en.md), [繁體中文指南](docs/player-interface.md), and [v2.0.0 release notes](docs/releases/v2.0.0.md). The guide covers voice status permissions, playback speed and session defaults, and Discord theme and progress-bar limits. Existing installations need no new environment variables or dependencies.
+Read the [English player and upgrade guide](docs/player-interface.en.md), [繁體中文指南](docs/player-interface.md), and [v2.1.0 release notes](docs/releases/v2.1.0.md). The guide covers voice status permissions, playback speed and session defaults, and Discord theme and progress-bar limits. Existing installations need no new environment variables or dependencies.
 
 ---
 
@@ -257,6 +257,15 @@ discord-music-bot/
 ---
 
 ## Changelog
+
+### v2.1.0 (2026-11-20)
+
+- **Playback and permissions**: Serialize each room's playback, invalidate cancelled requests and stale audio callbacks, reserve bots during dispatch, and require the same voice room and DJ permissions for shared controls.
+- **Connection recovery**: Preserve songs and queues during bounded SDK reconnect recovery, restore position and pause state, and keep explicit stops and kicks separate. DAVE compatibility errors now surface instead of silently succeeding.
+- **Spotify reliability**: Follow playlist/album pages up to 200 tracks; reject collection-title-only fallbacks; enforce a 25-second total resolution budget and cache failed resources for 120 seconds.
+- **Resource and storage safeguards**: Bound background submissions, separate metadata from audio extraction, preload independently of lyrics, retry transient SQLite writes with backoff, and serialize flushes.
+- **Diagnostics and validation**: Fix Lavalink diagnostics, add recovery/timeout counters and stop reasons, enable mypy in CI, and add Linux Python 3.10–3.14 and macOS 3.12/3.14 coverage. Use `./start.sh --check` to inspect your environment.
+- **Upgrade**: [English / 繁體中文 release notes](docs/releases/v2.1.0.md). Existing `.env` and database data remain usable. Install the updated requirements; discord.py is constrained to the verified 2.7 series.
 
 ### v2.0.0 (2026-11-17)
 

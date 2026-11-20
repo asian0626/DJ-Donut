@@ -189,6 +189,9 @@ async def _handle_shuffle(interaction: discord.Interaction) -> None:
         return
 
     state = b.get_state(interaction.guild_id)
+    if not has_dj_permission(interaction, state):
+        await interaction.response.send_message(t('dj_permission_denied', interaction, role_id=state.dj_role_id), ephemeral=True)
+        return
     if len(state.queue) < 2:
         await interaction.response.send_message(t('shuffle_need_more', interaction), ephemeral=True)
         return
@@ -360,6 +363,9 @@ async def _handle_autoplay(interaction: discord.Interaction) -> None:
         return
 
     state = b.get_state(interaction.guild_id)
+    if not has_dj_permission(interaction, state):
+        await interaction.response.send_message(t('dj_permission_denied', interaction, role_id=state.dj_role_id), ephemeral=True)
+        return
     state.autoplay = not state.autoplay
     save_guild_setting(interaction.guild_id, "autoplay", state.autoplay)
     msg_key = 'autoplay_enabled' if state.autoplay else 'autoplay_disabled'
@@ -378,6 +384,9 @@ async def _handle_247(interaction: discord.Interaction) -> None:
         return
 
     state = b.get_state(interaction.guild_id)
+    if not has_dj_permission(interaction, state):
+        await interaction.response.send_message(t('dj_permission_denied', interaction, role_id=state.dj_role_id), ephemeral=True)
+        return
     state.mode_247 = not state.mode_247
     save_guild_setting(interaction.guild_id, "mode_247", state.mode_247)
     msg_key = 'mode_247_enabled' if state.mode_247 else 'mode_247_disabled'

@@ -28,6 +28,7 @@ from core.models import (
     safe_voice_connect,
 )
 from core.player import play_next
+from core.recovery import sdk_reconnecting, wait_for_transport
 from core.voice_status import clear_voice_status, sync_voice_status
 from httpclient import get_http_session
 from storage import delete_queue_snapshot, load_queue_snapshots, save_queue_snapshot
@@ -72,7 +73,7 @@ class MusicNodeBot(commands.Bot):
         self._cleanup_task_started = False
 
         super().__init__(
-            command_prefix=[f"{node_id}!", f"!{node_id}", "!"],
+            command_prefix=commands.when_mentioned,
             intents=intents,
             help_command=None
         )
@@ -85,7 +86,12 @@ class MusicNodeBot(commands.Bot):
 
     async def close(self) -> None:
         try:
+            self.snapshot_all_states()
             for state in list(self.states.values()):
+                recovery = state.recovery_task
+                state.cleanup()
+                if recovery is not None:
+                    await asyncio.gather(recovery, return_exceptions=True)
                 await state.voice_status.close()
         finally:
             await super().close()
@@ -140,8 +146,23 @@ class MusicNodeBot(commands.Bot):
             return
         await play_next(self, player.guild)
 
-    async def _handle_self_disconnected(self, guild: discord.Guild, prev_channel: Any) -> None:
+    def _begin_voice_recovery(self, guild: discord.Guild, state: GuildMusicState, channel: Any) -> bool:
+        if state.expected_disconnect:
+            return True
+        vc = guild.voice_client
+        if vc and is_vc_connected(vc):
+            return True
+        if not vc or not state.current or channel is None or not sdk_reconnecting(vc):
+            return False
+        if not state.recovery_task or state.recovery_task.done():
+            state.reconnecting = True
+            state.recovery_task = asyncio.create_task(wait_for_transport(self, guild, state, vc, channel))
+        return True
+
+    async def _handle_self_disconnected(self, guild: discord.Guild, prev_channel: Any, *, allow_recovery: bool = True) -> None:
         state = self.get_state(guild.id)
+        if allow_recovery and self._begin_voice_recovery(guild, state, prev_channel):
+            return
         generation = state.voice_generation
         current_channel = state.voice_channel
         if prev_channel is not None and current_channel is not None and prev_channel.id != current_channel.id:
@@ -215,6 +236,7 @@ class MusicNodeBot(commands.Bot):
             state = self.get_state(guild.id)
             state.voice_generation += 1
             if after.channel is not None:
+                state.expected_disconnect = False
                 state.voice_channel = after.channel
                 await sync_voice_status(state)
             else:
