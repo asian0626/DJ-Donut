@@ -226,6 +226,9 @@ async def _handle_bassboost(interaction: discord.Interaction, level: app_command
         return
 
     state = b.get_state(interaction.guild_id)
+    if not has_dj_permission(interaction, state):
+        await interaction.response.send_message(t('dj_permission_denied', interaction, role_id=state.dj_role_id), ephemeral=True)
+        return
     bot_guild = get_bot_guild(b, interaction.guild_id, interaction.guild) or interaction.guild
     vc: Any = (bot_guild.voice_client if bot_guild else None) or discord.utils.get(
         getattr(b, 'voice_clients', []), guild__id=interaction.guild_id
@@ -256,6 +259,9 @@ async def _handle_filter(interaction: discord.Interaction, preset: app_commands.
         return
 
     state = b.get_state(interaction.guild_id)
+    if not has_dj_permission(interaction, state):
+        await interaction.response.send_message(t('dj_permission_denied', interaction, role_id=state.dj_role_id), ephemeral=True)
+        return
     bot_guild = get_bot_guild(b, interaction.guild_id, interaction.guild) or interaction.guild
     vc: Any = (bot_guild.voice_client if bot_guild else None) or discord.utils.get(
         getattr(b, 'voice_clients', []), guild__id=interaction.guild_id

@@ -32,7 +32,7 @@ def player(monkeypatch):
 def interaction():
     return SimpleNamespace(
         guild_id=123, locale='en-US',
-        user=SimpleNamespace(id=42),
+        user=SimpleNamespace(id=42, voice=SimpleNamespace(channel=SimpleNamespace(id=99))),
         response=SimpleNamespace(defer=AsyncMock(), edit_message=AsyncMock(), send_message=AsyncMock(), send_modal=AsyncMock()),
         followup=SimpleNamespace(send=AsyncMock()),
         edit_original_response=AsyncMock(),

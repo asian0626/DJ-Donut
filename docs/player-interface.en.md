@@ -1,6 +1,6 @@
-# DJ Donut 2.0.0 Player Interface
+# DJ Donut 2.1.0 Player Interface
 
-[English](player-interface.en.md) · [繁體中文](player-interface.md) · [README](../README.md) · [v2.0.0 release notes](releases/v2.0.0.md)
+[English](player-interface.en.md) · [繁體中文](player-interface.md) · [README](../README.md) · [v2.1.0 release notes](releases/v2.1.0.md)
 
 ## Card layout
 
@@ -34,11 +34,21 @@ Grant the bot **Set Voice Channel Status** permission. Clearing the status after
 
 Discord controls the card's background, fonts, button styling, and mobile layout. The viewer's theme affects its appearance. The bot cannot set the screenshot's overall gradient or green pill badge, so playback status uses a green dot. The progress bar is for display: Discord bot messages do not support a draggable slider. Seek with the menu's rewind/forward options or `/seek`.
 
-## Upgrade to 2.0.0
+## Upgrade to 2.1.0
 
 1. Stop the bot normally and retain your existing `.env`, `data/`, and custom settings.
-2. Update the working directory to the 2.0.0 code. Python deployments use the existing `requirements.txt` and startup method. Docker deployments rebuild and start with `docker compose up -d --build`.
+2. Update the working directory to the 2.1.0 code. Python deployments use the existing `requirements.txt` and startup method. Docker deployments rebuild and start with `docker compose up -d --build`.
 3. Check the bot's **Set Voice Channel Status** permission in each voice channel. You can additionally grant **Manage Channels** for status cleanup after leaving. Audio playback still works without status permission.
 4. For Python deployments, restart with `python3 main.py`. Play a song or run `/nowplaying` to create the new card, then check its control menu and the voice channel status.
 
 No new environment variables, dependencies, or manual database migration are required. The existing requirements already include discord.py 2.7 or later. Existing slash commands remain available.
+
+## 2.1.0 reliability and runtime
+
+The player serializes each room's playback. Shared controls require the same voice room and the existing DJ policy. Stop cancels pending playback work; old callbacks cannot advance a new song.
+
+During SDK reconnects, the room retains its song and queue for up to 35 seconds while waiting for the existing connection. Recovery restores the saved position and pause state. Explicit stops, confirmed kicks, or exhausted recovery clear the room. Network outages can still interrupt audio.
+
+Spotify resolution has a 25-second overall budget, failed resources are cached for 120 seconds, and collection imports follow pages up to 200 tracks. Private, personalized, or API-restricted playlists may remain unavailable; the bot will not invent a track from the collection title.
+
+Use `./start.sh --check` to inspect Python and package versions. Python 3.10–3.14 is accepted; a new environment prefers 3.12. Existing unsupported environments are preserved and rejected with instructions. Install the updated `requirements.txt` before restarting. The compatibility patch targets discord.py 2.7.x.

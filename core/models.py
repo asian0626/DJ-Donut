@@ -42,6 +42,7 @@ class BufferedAudioSource(discord.AudioSource):
         self._consecutive_silence = 0
         self._stop_event = threading.Event()
         self._finished = False
+        self.first_frame = threading.Event()
         self._started = False
         self._thread = threading.Thread(target=self._worker, daemon=True)
         self._thread.start()
@@ -67,6 +68,7 @@ class BufferedAudioSource(discord.AudioSource):
                 if not data:
                     self._finished = True
                     break
+                self.first_frame.set()
                 self._put_frame(data)
         except Exception:
             logger.debug("BufferedAudioSource worker stopped", exc_info=True)
@@ -194,7 +196,13 @@ class GuildMusicState:
         self.pause_timestamp: float = 0.0
         self.consecutive_failures: int = 0
         self.is_seeking: bool = False
-        self.audio_control_lock = asyncio.Lock()
+        self.playback_lock = asyncio.Lock()
+        self.audio_control_lock = self.playback_lock
+        self.playback_generation = 0
+        self.pending_requests = 0
+        self.reconnecting = False
+        self.expected_disconnect = False
+        self.recovery_task: Optional[asyncio.Task[Any]] = None
         self.dj_role_id: Optional[int] = None
         self.current_view: Optional[discord.ui.View | discord.ui.LayoutView] = None
         self.progress_task: Optional[asyncio.Task[Any]] = None
@@ -224,6 +232,11 @@ class GuildMusicState:
         self.last_active = time.time()
 
     def cleanup(self) -> None:
+        self.playback_generation += 1
+        self.reconnecting = False
+        if self.recovery_task and self.recovery_task is not asyncio.current_task():
+            self.recovery_task.cancel()
+        self.recovery_task = None
         self.last_active = time.time()
         self.cancel_progress_task()
         self.cancel_preload_task()
@@ -330,9 +343,11 @@ def apply_encoder_bitrate(vc: Any) -> None:
 def make_after_callback(bot: Any, guild: Optional[discord.Guild], state: 'GuildMusicState') -> Any:
     """建立 vc.play(after=...) 回呼：播放結束後排程 play_next。"""
     node_name = getattr(bot, 'node_name', 'Bot')
+    expected_song = state.current
+    generation = state.playback_generation
 
     def after_callback(error: Any) -> None:
-        if state.is_seeking or not guild:
+        if state.is_seeking or not guild or state.current is not expected_song or state.playback_generation != generation:
             return
         if error:
             logger.error(f"[{node_name} Player Error] {error}")
@@ -428,15 +443,19 @@ async def _toggle_player_pause(vc: Any, state: Optional['GuildMusicState'] = Non
 
 
 async def safe_pause_resume(vc: Any, state: Optional['GuildMusicState'] = None, bot: Optional[Any] = None, guild: Optional[discord.Guild] = None) -> str:
-    result = await _toggle_player_pause(vc, state, bot, guild)
+    if state is None:
+        return await _toggle_player_pause(vc, state, bot, guild)
+    async with state.playback_lock:
+        result = await _toggle_player_pause(vc, state, bot, guild)
     if state is not None and result in ('paused', 'resumed'):
         await sync_voice_status(state, getattr(vc, 'channel', None))
     return result
 
 
-async def safe_stop(vc: Any) -> None:
+async def safe_stop(vc: Any, *, reason: str = "stop_or_transition") -> None:
     if not vc:
         return
+    logger.info('Audio stop requested: node=%s guild=%s reason=%s', getattr(getattr(vc, 'client', None), 'node_id', None), getattr(getattr(vc, 'guild', None), 'id', None), reason)
     try:
         if hasattr(vc, 'stop'):
             if asyncio.iscoroutinefunction(vc.stop):
@@ -488,9 +507,13 @@ def _prune_client_voice_tracking(vc: Any) -> None:
 async def safe_disconnect(vc: Any) -> None:
     if not vc:
         return
+    client = getattr(vc, 'client', None)
+    state = getattr(client, 'states', {}).get(getattr(getattr(vc, 'guild', None), 'id', None))
+    if state is not None:
+        state.expected_disconnect = True
     await clear_client_voice_status(vc)
     try:
-        await safe_stop(vc)
+        await safe_stop(vc, reason="disconnect")
     except Exception:
         logger.debug("Ignored exception in safe_disconnect", exc_info=True)
     await _invoke_vc_disconnect(vc)
@@ -531,6 +554,9 @@ async def _reconnect_after_already_connected(
 async def safe_voice_connect(bot: Any, voice_channel: Any, timeout: float = 30.0, cls: Any = None) -> Any:
     guild_id = voice_channel.guild.id
     bot_guild = bot.get_guild(guild_id) or voice_channel.guild
+    get_channel = getattr(bot_guild, 'get_channel', None)
+    if callable(get_channel):
+        voice_channel = get_channel(voice_channel.id) or voice_channel
     vc: Any = (bot_guild.voice_client if bot_guild else None) or discord.utils.get(
         getattr(bot, 'voice_clients', []), guild__id=guild_id
     )
@@ -604,7 +630,7 @@ async def hot_swap_current_stream(
 
         apply_encoder_bitrate(vc)
         after_callback = make_after_callback(bot, guild, state)
-        await safe_stop(vc)
+        await safe_stop(vc, reason="seek_or_effect")
         if state.current is not current_song:
             audio_source.cleanup()
             state.is_seeking = False

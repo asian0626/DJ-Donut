@@ -1,5 +1,6 @@
 import contextlib
 import logging
+from typing import Any, cast
 
 import discord.gateway
 import discord.voice_state
@@ -13,7 +14,9 @@ def apply_dave_fix() -> None:
     global _PATCHED
     if _PATCHED:
         return
-    _PATCHED = True
+    if discord.version_info[:2] != (2, 7):
+        logger.warning('DAVE compatibility patch skipped for unverified discord.py %s', discord.__version__)
+        return
 
     # 1. 修復 can_encrypt 判定並在需要時自動完成初始 DAVE 過渡 (transition 0)
     def patched_can_encrypt(self: discord.voice_state.VoiceConnectionState) -> bool:
@@ -25,7 +28,7 @@ def apply_dave_fix() -> None:
             return bool(self.dave_session.ready)
         return False
 
-    discord.voice_state.VoiceConnectionState.can_encrypt = property(patched_can_encrypt)
+    cast(Any, discord.voice_state.VoiceConnectionState).can_encrypt = property(patched_can_encrypt)
 
     # 2. 修復 Voice Gateway 二進位封包處理：收到 MLS 提交後自動就緒
     orig_received_binary = discord.gateway.DiscordVoiceWebSocket.received_binary_message
@@ -38,10 +41,9 @@ def apply_dave_fix() -> None:
                 state.dave_session.prepare_transition(0, state.dave_protocol_version or 1)
                 state.dave_session.execute_transition(0)
 
-    discord.gateway.DiscordVoiceWebSocket.received_binary_message = patched_received_binary_message
+    cast(Any, discord.gateway.DiscordVoiceWebSocket).received_binary_message = patched_received_binary_message
 
     # 3. 修復 _voice_connect 在連線斷線重試時 channel 可能為 None 的問題
-    orig_voice_connect = discord.voice_state.VoiceConnectionState._voice_connect
 
     async def patched_voice_connect(
         self: discord.voice_state.VoiceConnectionState,
@@ -53,9 +55,10 @@ def apply_dave_fix() -> None:
         if channel and hasattr(channel, "guild"):
             await channel.guild.change_voice_state(channel=channel, self_deaf=self_deaf, self_mute=self_mute)
         else:
-            with contextlib.suppress(Exception):
-                await orig_voice_connect(self, self_deaf=self_deaf, self_mute=self_mute)
+            logger.warning('Voice reconnect has no target channel; aborting handshake')
+            raise discord.ClientException('Voice reconnect has no target channel')
 
-    discord.voice_state.VoiceConnectionState._voice_connect = patched_voice_connect
+    cast(Any, discord.voice_state.VoiceConnectionState)._voice_connect = patched_voice_connect
 
+    _PATCHED = True
     logger.info("🛡️ DAVE E2EE 語音安全加密引擎已啟用並修復自動就緒協商")

@@ -148,5 +148,10 @@
   "player_eq_treble": "高音增强",
   "player_eq_nightcore": "Nightcore",
   "player_eq_vaporwave": "Vaporwave",
-  "player_eq_8d": "8D 环绕"
+  "player_eq_8d": "8D 环绕",
+  "player_same_room": "请先加入播放器所在的语音频道，才能操作控制。",
+  "player_bot_busy": "这只机器人正在服务其他语音房，请选择其他机器人或自动分流。",
+  "player_request_cancelled": "此播放请求已取消，请重新点歌。",
+  "platform_resolve_failed": "无法解析此 {platform} 资源，可能为私人、个性化、受限内容或暂时超时，请改用公开单曲或歌单。",
+  "player_reconnecting": "语音连接正在恢复，请稍后再操作。"
 }

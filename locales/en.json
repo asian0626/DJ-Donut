@@ -148,5 +148,10 @@
   "player_eq_treble": "Treble boost",
   "player_eq_nightcore": "Nightcore",
   "player_eq_vaporwave": "Vaporwave",
-  "player_eq_8d": "8D surround"
+  "player_eq_8d": "8D surround",
+  "player_same_room": "Join the same voice channel as the player to use this control.",
+  "player_bot_busy": "That bot is serving another voice room. Choose another bot or use automatic dispatch.",
+  "player_request_cancelled": "This play request was cancelled. Please submit it again.",
+  "platform_resolve_failed": "Cannot resolve this {platform} resource. It may be private, personalized, restricted, or temporarily unavailable. Try a public track or playlist.",
+  "player_reconnecting": "The voice connection is recovering. Please try this control shortly."
 }

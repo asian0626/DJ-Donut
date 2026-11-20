@@ -270,7 +270,7 @@ async def test_native_seek_rebuilds_ffmpeg_at_media_position_and_preserves_pause
     await audio_controls.seek_player(bot, state, vc, 90)
     assert '-ss 90' in create_source.call_args.kwargs['before_options']
     assert 'atempo=1.5' in create_source.call_args.kwargs['options']
-    stop.assert_awaited_once_with(vc)
+    stop.assert_awaited_once_with(vc, reason="seek_or_effect")
     vc.play.assert_called_once()
     vc.pause.assert_called_once()
     now[0] += 100

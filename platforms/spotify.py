@@ -1,15 +1,21 @@
+import asyncio
 import json
+import time
+import aiohttp
+
+from cachetools import TTLCache
+from ytdl import run_metadata
 import os
 import re
 from typing import Any, Dict, List, Optional
 import urllib.parse
+from itertools import islice
 
 from config import (
     get_cached_metadata,
     get_http_session,
     get_thread_ytdl,
     logger,
-    run_media,
     set_cached_metadata,
 )
 
@@ -18,6 +24,8 @@ SPOTIFY_URL_REGEX = re.compile(
 )
 
 _spotify_state: Dict[str, Any] = {"client": None}
+_SPOTIFY_FAILURES: TTLCache[str, bool] = TTLCache(maxsize=256, ttl=120)
+SPOTIFY_TIMEOUT = 25.0
 
 
 def get_spotify_client() -> Any:
@@ -43,7 +51,7 @@ def get_spotify_client() -> Any:
         if cache_handler:
             auth_kwargs["cache_handler"] = cache_handler
         auth_mgr = SpotifyClientCredentials(**auth_kwargs)
-        _spotify_state["client"] = spotipy.Spotify(auth_manager=auth_mgr)
+        _spotify_state["client"] = spotipy.Spotify(auth_manager=auth_mgr, requests_timeout=(3, 8), retries=0, status_retries=0)
         logger.info("[Spotify API] 成功初始化官方 Spotify API 客戶端！")
     except ImportError:
         logger.debug("Ignored exception in get_spotify_client", exc_info=True)
@@ -137,6 +145,8 @@ def _parse_entity_collection(entity: dict, item_type: str) -> Optional[dict]:
 
 
 def _parse_spotify_og_meta(html: str, item_type: str, item_id: str) -> Optional[dict]:
+    if item_type != "track":
+        return None
     og_title_m = re.search(r'<meta\s+property=["\']og:title["\']\s+content=["\']([^"\']+)["\']', html)
     if not og_title_m:
         return None
@@ -207,6 +217,25 @@ def _api_track_item(track_obj: dict, fallback_thumb: str = "", fallback_artist: 
     }
 
 
+def _api_collection_tracks(sp: Any, page: dict, thumbnail: str, artist: str = '', playlist: bool = False) -> List[dict]:
+    tracks: List[dict] = []
+    seen = set()
+    while page and len(tracks) < 200:
+        for item in page.get('items', []):
+            raw = (item or {}).get('track') if playlist else item
+            track = _api_track_item(raw or {}, thumbnail, artist)
+            if track:
+                tracks.append(track)
+            if len(tracks) == 200:
+                break
+        next_url = page.get('next')
+        if not next_url or next_url in seen or len(tracks) == 200:
+            break
+        seen.add(next_url)
+        page = sp.next(page)
+    return tracks
+
+
 def _resolve_spotify_api_sync(sp: Any, item_type: str, item_id: str) -> Optional[dict]:
     try:
         if item_type == 'track':
@@ -224,8 +253,7 @@ def _resolve_spotify_api_sync(sp: Any, item_type: str, item_id: str) -> Optional
         if item_type == 'playlist':
             pl = sp.playlist(item_id)
             pl_thumb = pl['images'][0].get('url', '') if pl.get('images') else ''
-            raw_items = pl.get('tracks', {}).get('items', [])
-            tracks = [t for item in raw_items[:200] if (t := _api_track_item(item.get('track') or {}, pl_thumb))]
+            tracks = _api_collection_tracks(sp, pl.get('tracks', {}), pl_thumb, playlist=True)
             return {
                 'type': 'playlist',
                 'title': pl.get('name', 'Spotify 播放清單'),
@@ -238,8 +266,7 @@ def _resolve_spotify_api_sync(sp: Any, item_type: str, item_id: str) -> Optional
             album = sp.album(item_id)
             album_thumb = album['images'][0].get('url', '') if album.get('images') else ''
             album_artist = ", ".join(a['name'] for a in album.get('artists', []) if a.get('name'))
-            raw_items = album.get('tracks', {}).get('items', [])
-            tracks = [t for obj in raw_items[:200] if (t := _api_track_item(obj or {}, album_thumb, album_artist))]
+            tracks = _api_collection_tracks(sp, album.get('tracks', {}), album_thumb, album_artist)
             return {
                 'type': 'album',
                 'title': album.get('name', 'Spotify 專輯'),
@@ -249,11 +276,14 @@ def _resolve_spotify_api_sync(sp: Any, item_type: str, item_id: str) -> Optional
                 'tracks': tracks
             }
     except Exception as e:
-        logger.warning(f"[Spotify API] 官方 API 解析失敗: {e}，自動切換至爬蟲模式...")
+        status = getattr(e, 'http_status', None)
+        logger.warning('Spotify API unavailable: type=%s id=%s status=%s; trying public metadata', item_type, item_id, status)
     return None
 
 
 def _format_ytdl_spotify_result(ytdl_res: dict, item_type: str, url: str) -> Optional[dict]:
+    if item_type != 'track' and not ytdl_res.get('entries'):
+        return None
     title = ytdl_res.get('title', '')
     artist = ytdl_res.get('artist') or ytdl_res.get('uploader') or ''
     thumb = ytdl_res.get('thumbnail', '')
@@ -261,7 +291,7 @@ def _format_ytdl_spotify_result(ytdl_res: dict, item_type: str, url: str) -> Opt
     entries = ytdl_res.get('entries', [])
     if entries:
         tracks = []
-        for e in entries:
+        for e in islice(entries, 200):
             if not e:
                 continue
             etitle = e.get('title', '')
@@ -317,7 +347,8 @@ async def fetch_spotify_html_async(url: str) -> str:
         'Accept-Language': 'zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7',
     }
     session = await get_http_session()
-    async with session.get(url, headers=headers) as resp:
+    async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=12)) as resp:
+        resp.raise_for_status()
         return await resp.text(errors='ignore')
 
 
@@ -374,17 +405,28 @@ async def _try_spotify_embed_scrape(item_type: str, item_id: str) -> Optional[di
 
 async def _try_spotify_ytdl(url: str, item_type: str) -> Optional[dict]:
     try:
-        ytdl_res = await run_media(lambda u=url: extract_spotify_ytdl_sync(u))
-        if ytdl_res:
-            res = _format_ytdl_spotify_result(ytdl_res, item_type, url)
-            if res and res.get('tracks'):
-                return res
+        def extract() -> Optional[dict]:
+            data = extract_spotify_ytdl_sync(url)
+            return _format_ytdl_spotify_result(data, item_type, url) if data else None
+        return await run_metadata(extract, timeout=10)
     except Exception:
         logger.debug("Ignored exception in _try_spotify_ytdl", exc_info=True)
     return None
 
 
-async def resolve_spotify(url: str) -> Optional[dict]:
+async def _try_spotify_api(item_type: str, item_id: str) -> Optional[dict]:
+    sp = get_spotify_client()
+    if sp is None:
+        return None
+    try:
+        result = await run_metadata(lambda: _resolve_spotify_api_sync(sp, item_type, item_id), timeout=15)
+        return result if result and result.get('tracks') else None
+    except Exception:
+        logger.warning('Spotify API stage failed; trying public metadata', exc_info=True)
+        return None
+
+
+async def _resolve_spotify_uncached(url: str) -> Optional[dict]:
     cached = get_cached_metadata(url)
     if cached:
         return cached
@@ -400,11 +442,7 @@ async def resolve_spotify(url: str) -> Optional[dict]:
         return cached_norm
 
     res: Optional[dict] = None
-    sp = get_spotify_client()
-    if sp:
-        res = await run_media(lambda s=sp, it=item_type, ii=item_id: _resolve_spotify_api_sync(s, it, ii))
-        if res and not res.get('tracks'):
-            res = None
+    res = await _try_spotify_api(item_type, item_id)
 
     if not res and item_type == 'track':
         res = await _try_spotify_oembed_track(url, item_id)
@@ -418,3 +456,23 @@ async def resolve_spotify(url: str) -> Optional[dict]:
         set_cached_metadata(norm_key, res)
         return res
     return None
+
+
+async def resolve_spotify(url: str) -> Optional[dict]:
+    match = SPOTIFY_URL_REGEX.search(url)
+    if not match or match.group(1) == 'artist':
+        return None
+    key = ':'.join(match.groups())
+    if key in _SPOTIFY_FAILURES:
+        return None
+    started = time.monotonic()
+    try:
+        result = await asyncio.wait_for(_resolve_spotify_uncached(url), timeout=SPOTIFY_TIMEOUT)
+    except Exception as exc:
+        logger.warning('Spotify resolution failed: resource=%s error=%s elapsed=%.2fs', key, type(exc).__name__, time.monotonic() - started)
+        result = None
+    if not result or not result.get('tracks'):
+        _SPOTIFY_FAILURES[key] = True
+        return None
+    logger.info('Spotify resolved: resource=%s tracks=%d elapsed=%.2fs', key, len(result['tracks']), time.monotonic() - started)
+    return result

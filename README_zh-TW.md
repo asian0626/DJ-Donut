@@ -5,8 +5,8 @@
 [![English](https://img.shields.io/badge/Language-English-blue?style=flat-square)](README.md)
 [![繁體中文](https://img.shields.io/badge/語言-繁體中文-red?style=flat-square)](README_zh-TW.md)
 
-![版本](https://img.shields.io/badge/版本-v2.0.0-blue?logo=git)
-![Python](https://img.shields.io/badge/Python-3.10%20%7C%203.11%20%7C%203.12-3776AB?logo=python&logoColor=white)
+![版本](https://img.shields.io/badge/版本-v2.1.0-blue?logo=git)
+![Python](https://img.shields.io/badge/Python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13%20%7C%203.14-3776AB?logo=python&logoColor=white)
 ![Discord.py](https://img.shields.io/badge/Discord.py-v2.7.0%2B-5865F2?logo=discord&logoColor=white)
 ![Lavalink](https://img.shields.io/badge/Lavalink-v4.0%2B-FF3366?logo=audacity&logoColor=white)
 ![Docker](https://img.shields.io/badge/Docker-支援-2496ED?logo=docker&logoColor=white)
@@ -62,9 +62,9 @@
 
 ## 播放介面
 
-DJ Donut 2.0.0 的 `/play` 與 `/nowplaying` 會顯示 Discord Components V2 播放卡片。主按鈕提供打亂、重播、暫停／繼續、下一首與收藏；下拉選單依序提供音量、循環、倒退 15 秒、快轉 15 秒、待播清單、自動接歌、等化器、速度、跟唱模式、歌詞與停止。
+DJ Donut 2.1.0 的 `/play` 與 `/nowplaying` 會顯示 Discord Components V2 播放卡片。主按鈕提供打亂、重播、暫停／繼續、下一首與收藏；下拉選單依序提供音量、循環、倒退 15 秒、快轉 15 秒、待播清單、自動接歌、等化器、速度、跟唱模式、歌詞與停止。
 
-請參閱[繁體中文播放與升級指南](docs/player-interface.md)、[English guide](docs/player-interface.en.md) 及 [v2.0.0 發行說明](docs/releases/v2.0.0.md)。指南包含語音狀態權限、播放速度與房間工作階段預設，以及 Discord 主題與進度條限制。既有安裝無須新增環境變數或相依套件。
+請參閱[繁體中文播放與升級指南](docs/player-interface.md)、[English guide](docs/player-interface.en.md) 及 [v2.1.0 發行說明](docs/releases/v2.1.0.md)。指南包含語音狀態權限、播放速度與房間工作階段預設，以及 Discord 主題與進度條限制。既有安裝無須新增環境變數或相依套件。
 
 ---
 
@@ -257,6 +257,15 @@ DJ-Donut/
 ---
 
 ## 📝 更新日誌
+
+### v2.1.0 (2026-11-20)
+
+- **播放流程與權限**：各房間播放序列化，取消過期點歌請求與音訊回呼；分流期間預留機器人，共用控制需同一語音房並通過 DJ 權限。
+- **連線恢復**：SDK 重連期間保留歌曲與隊列，在有限等待內恢復位置與暫停狀態，區分主動停止與被踢出；DAVE 相容處理不再吞掉連線錯誤。
+- **Spotify 可靠性**：歌單與專輯分頁讀取至最多 200 首，拒絕只有歌單標題的錯誤回退；整體解析限時 25 秒，失敗資源快取 120 秒。
+- **資源與儲存保護**：限制背景工作提交量，分離中繼資料與音訊解析，預載不再等待歌詞，SQLite 暫時寫入失敗會退避重試，flush 依序執行。
+- **診斷與驗證**：修正 Lavalink 診斷，新增重連／逾時計數與停止原因，CI 加入 mypy、Linux Python 3.10–3.14 與 macOS 3.12／3.14 測試。可用 `./start.sh --check` 查看環境。
+- **升級方式**：[中英文 Release 說明](docs/releases/v2.1.0.md)。沿用原本 `.env` 與資料庫；請安裝更新後的相依需求，discord.py 限定為已驗證的 2.7 系列。
 
 ### v2.0.0 (2026-11-17)
 

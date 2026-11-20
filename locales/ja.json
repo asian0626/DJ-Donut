@@ -148,5 +148,10 @@
   "player_eq_treble": "高音強調",
   "player_eq_nightcore": "Nightcore",
   "player_eq_vaporwave": "Vaporwave",
-  "player_eq_8d": "8Dサラウンド"
+  "player_eq_8d": "8Dサラウンド",
+  "player_same_room": "操作するにはプレイヤーと同じボイスチャンネルに参加してください。",
+  "player_bot_busy": "このボットは別のルームで使用中です。別のボットか自動選択を使ってください。",
+  "player_request_cancelled": "この再生リクエストはキャンセルされました。もう一度送信してください。",
+  "platform_resolve_failed": "{platform} を解析できません。非公開・個人向け・制限付きの内容、または一時的な障害の可能性があります。公開曲やプレイリストをお試しください。",
+  "player_reconnecting": "音声接続を復旧中です。しばらくしてから操作してください。"
 }

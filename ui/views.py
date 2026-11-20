@@ -260,11 +260,19 @@ class MusicControllerView(discord.ui.LayoutView):
         if handler is not None:
             await handler(interaction)
 
-    async def _can_change_player(self, interaction: discord.Interaction) -> bool:
+    async def _can_change_player(self, interaction: discord.Interaction, *, allow_reconnecting: bool = False) -> bool:
         if not await self.interaction_check(interaction):
+            return False
+        user_voice = getattr(getattr(interaction.user, 'voice', None), 'channel', None)
+        target = self.state.voice_channel or getattr(self._get_vc(interaction), 'channel', None)
+        if user_voice is None or target is None or user_voice.id != target.id:
+            await interaction.response.send_message(t('player_same_room', lang=self.lang), ephemeral=True)
             return False
         if not has_dj_permission(interaction, self.state):
             await interaction.response.send_message(t('dj_permission_denied', interaction, role_id=self.state.dj_role_id), ephemeral=True)
+            return False
+        if self.state.reconnecting and not allow_reconnecting:
+            await interaction.response.send_message(t('player_reconnecting', lang=self.lang), ephemeral=True)
             return False
         return True
 
@@ -381,8 +389,7 @@ class MusicControllerView(discord.ui.LayoutView):
         return (bot_guild.voice_client if bot_guild else None) or discord.utils.get(getattr(self.bot, 'voice_clients', []), guild__id=gid)
 
     async def replay(self, interaction: discord.Interaction):
-        if not has_dj_permission(interaction, self.state):
-            await interaction.response.send_message(t('dj_permission_denied', interaction, role_id=self.state.dj_role_id), ephemeral=True)
+        if not await self._can_change_player(interaction):
             return
         vc = self._get_vc(interaction)
         if not vc or not self.state.current:
@@ -391,10 +398,12 @@ class MusicControllerView(discord.ui.LayoutView):
         self.state.last_active = time.time()
         self.state.skip_requested = True
         self.state.queue.appendleft(self.state.current)
-        await safe_stop(vc)
+        await safe_stop(vc, reason="replay")
         await interaction.response.send_message("⏮️ 重播當前歌曲！", ephemeral=True)
 
     async def play_pause(self, interaction: discord.Interaction):
+        if not await self._can_change_player(interaction):
+            return
         gid = interaction.guild_id or self.state.guild_id
         bot_guild = self.bot.get_guild(gid) or interaction.guild
         vc = self._get_vc(interaction)
@@ -416,8 +425,7 @@ class MusicControllerView(discord.ui.LayoutView):
             logger.debug("Ignored exception in play_pause", exc_info=True)
 
     async def skip(self, interaction: discord.Interaction):
-        if not has_dj_permission(interaction, self.state):
-            await interaction.response.send_message(t('dj_permission_denied', interaction, role_id=self.state.dj_role_id), ephemeral=True)
+        if not await self._can_change_player(interaction):
             return
         vc = self._get_vc(interaction)
         if not vc:
@@ -428,10 +436,12 @@ class MusicControllerView(discord.ui.LayoutView):
         if self.state.loop_mode == 'single':
             self.state.loop_mode = 'off'
         self.state.cancel_progress_task()
-        await safe_stop(vc)
+        await safe_stop(vc, reason="skip")
         await interaction.response.send_message(t('skipped', interaction, bot_name=self.bot.node_name))
 
     async def toggle_loop(self, interaction: discord.Interaction):
+        if not await self._can_change_player(interaction):
+            return
         self.state.last_active = time.time()
         modes = ['off', 'single', 'queue']
         idx = modes.index(self.state.loop_mode)
@@ -439,8 +449,7 @@ class MusicControllerView(discord.ui.LayoutView):
         await self._refresh_interaction(interaction)
 
     async def stop_btn(self, interaction: discord.Interaction):
-        if not has_dj_permission(interaction, self.state):
-            await interaction.response.send_message(t('dj_permission_denied', interaction, role_id=self.state.dj_role_id), ephemeral=True)
+        if not await self._can_change_player(interaction, allow_reconnecting=True):
             return
         vc = self._get_vc(interaction)
         self.state.last_active = time.time()
@@ -448,7 +457,7 @@ class MusicControllerView(discord.ui.LayoutView):
         self._disable_controls()
         await interaction.response.edit_message(view=self)
         self.state.cleanup()
-        await safe_stop(vc)
+        await safe_stop(vc, reason="user_stop")
         await safe_disconnect(vc)
         self.stop()
         await interaction.followup.send(t('stopped_and_left', interaction, bot_name=self.bot.node_name), ephemeral=True)
@@ -460,6 +469,8 @@ class MusicControllerView(discord.ui.LayoutView):
         await self.apply_setting(interaction, 'volume', str(min(200, int(self.state.volume * 100) + 10)))
 
     async def toggle_autoplay(self, interaction: discord.Interaction):
+        if not await self._can_change_player(interaction):
+            return
         self.state.autoplay = not self.state.autoplay
         save_guild_setting(self.state.guild_id, "autoplay", self.state.autoplay)
         await self._refresh_interaction(interaction)
@@ -529,6 +540,8 @@ class MusicControllerView(discord.ui.LayoutView):
             )
 
     async def fav_play(self, interaction: discord.Interaction):
+        if not await self._can_change_player(interaction):
+            return
         favs = get_user_favorites(interaction.user.id)
         if not favs:
             await interaction.response.send_message("⭐ 您的個人收藏清單目前是空的！先按`➕` 收藏按鈕將喜歡的歌曲存起來吧！", ephemeral=True)
@@ -555,8 +568,7 @@ class MusicControllerView(discord.ui.LayoutView):
         await interaction.followup.send(f"⭐ 已成功將您收藏的 **`{added_count}`** 首最愛歌曲排入當前待播隊列！", ephemeral=True)
 
     async def shuffle_btn(self, interaction: discord.Interaction):
-        if not has_dj_permission(interaction, self.state):
-            await interaction.response.send_message(t('dj_permission_denied', interaction, role_id=self.state.dj_role_id), ephemeral=True)
+        if not await self._can_change_player(interaction):
             return
         if len(self.state.queue) < 2:
             await interaction.response.send_message(t('queue_empty', interaction), ephemeral=True)
@@ -625,6 +637,13 @@ class SearchSelectView(discord.ui.View):
 
         guild = self.guild or interaction.guild
         if not guild:
+            return
+
+        bot_guild = self.bot.get_guild(guild.id) or guild
+        vc = getattr(bot_guild, 'voice_client', None)
+        user_room = getattr(getattr(interaction.user, 'voice', None), 'channel', None)
+        if user_room is None or getattr(getattr(vc, 'channel', None), 'id', None) != user_room.id:
+            await interaction.response.send_message(t('player_same_room', interaction), ephemeral=True)
             return
 
         idx = int(self.select_menu.values[0])
